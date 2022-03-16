@@ -1,0 +1,17 @@
+vGLK	GLCi + P -> G6P
+vPGI	G6P -> F6P
+vGLYCO	G6P + P -> Glyc
+vTreha	2 * G6P + P -> Trh
+vPFK	F6P + P -> F16P
+vALD	F16P -> 2 * TRIO
+vGAPDH	TRIO + NAD -> BPG + NADH
+vPGK	BPG -> P3G + P
+vPGM	P3G -> P2G
+vENO	P2G -> PEP
+vPYK	PEP -> PYR + P
+vPDC	PYR -> ACE + CO2
+vSUC	2 * ACE + 3 * NAD + 4 * P -> 3 * NADH + SUCC
+vGLT	GLCo -> GLCi
+vADH	ACE + NADH -> NAD + ETOH
+vG3PDH	TRIO + NADH -> NAD + GLY
+vATP	P -> 

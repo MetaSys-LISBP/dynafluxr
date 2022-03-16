@@ -1,0 +1,19 @@
+Package: dynafluxr
+Type: Package
+Title: Retrive Flux Dynamics from Metabolic Kinetic Measurements
+Version: 0.1.0
+Author: Serguei Sokol <sokol@insa-toulouse.fr>
+Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
+Description: Flux dynamics can be retrieved from kinetic measurements
+  of metabolites and/or their isotopes. User has to provide
+  corresponding stoechiometric
+  matrix but not a regulation model (Michaelis-Menten or similar).
+  Instead of solving an ODE system describing the evolution of metabolite concentrations,
+  we use B-splines to catch the system dynamics and solve a least square problem
+  on their coefficients with optional constraints on initial values of concentration.
+  The package 'dynafluxr' can be used as a library providing useful functions but also as
+  an application with command line interface.
+License: GPL-2
+Encoding: UTF-8
+Depends: bspline
+RoxygenNote: 7.1.1
