@@ -6,9 +6,39 @@
 \usage{
 fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL)
 }
-\value{
+\arguments{
+\item{mf}{Data-frame or matrix, metabolite kinetic measurements.
+Columns must be named with metabolite names and 'Time'.}
 
+\item{sto}{Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
+metabolite 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
+the metabolite 'i' is consumed. Columns must be named with flux names.
+Rows must be names with metabolite names.}
+
+\item{nsp}{Integer, polynomial order of B-spline to use for metabolites}
+
+\item{nki}{Integer, number of internal knots for B-splines}
+
+\item{lieq}{List, equality constraints on metabolites}
+}
+\value{
+List with following components:
+\describe{
+  \item{mf:}{ metabolite data frame used for fitting}
+  \item{sto:}{ stoichiometric matrix used for fitting}
+  \item{msp:}{ metabolite spline function}
+  \item{fsp:}{ flux spline function}
+  \item{dsp:}{ metabolite first derivative spline function}
+  \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
+}
 }
 \description{
 Retrieve flux dynamics from metabolic kinetics
+}
+\details{
+Each item in \code{lieq} corresponds to a metabolite and is a
+  2 column matrix (Time, Value). Each
+  row of this matrix indicates what 'Value' must take corresponding
+  metabolite at what 'Time'. Typically, it can be used to impose
+  starting values at Time=0 for some metabolites.
 }

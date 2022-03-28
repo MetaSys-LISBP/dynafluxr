@@ -6,22 +6,35 @@
 \usage{
 cli(args = commandArgs(trailingOnly = TRUE))
 }
+\arguments{
+\item{args}{Character vector, command line parameters (default
+\code{commandArgs(trailingOnly=TRUE)})}
+}
 \description{
 Function to be called from shell command line
 }
+\details{
+run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
+  in shell to get a help page with available option description
+}
 \examples{
+  # from shell
+  # $ Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt
+
+  # from R session
   ddir=system.file("data", package="dynafluxr")
   meas=file.path(ddir, "data_teusink.tsv")
   sto=file.path(ddir, "network_teusink.txt")
   res=cli(c("-m", meas, "-s", sto, "--skip", "10"))
   tp=res$mf$Time
   np=length(tp)
+  # build tpp, fine time vector for smooth spline plotting
   npp=10L # number of plot points in each tp interval
   dtp=diff(tp)
   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/npp, each=npp)))
   # plot metabolites
   matplot(tpp, res$msp(tpp), type="l")
-  matpoints(tp, res$mf[,-1], pch=".")
+  matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6)
   # plot fluxes
   dev.new()
@@ -30,7 +43,7 @@ Function to be called from shell command line
   tf=as.numeric(rownames(ref)) # reference flux time points
   nm_flux=colnames(bsppar(res$fsp)$qw)
   itf=(tf >= min(tp) & tf <= max(tp))
-  matpoints(tf[itf], ref[itf, nm_flux, drop=FALSE], pch=".")
+  matpoints(tf[itf], ref[itf, nm_flux, drop=FALSE], pch="o", cex=0.5)
   legend("topright", legend=nm_flux, lty=1:5, col=1:6)
   # plot residuals
   dev.new()

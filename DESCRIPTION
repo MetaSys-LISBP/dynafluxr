@@ -15,5 +15,5 @@ Description: Flux dynamics can be retrieved from kinetic measurements
   an application with command line interface.
 License: GPL-2
 Encoding: UTF-8
-Depends: bspline
+Depends: bspline, optparse
 RoxygenNote: 7.1.1

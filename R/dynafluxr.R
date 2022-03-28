@@ -1,18 +1,28 @@
 #' Function to be called from shell command line
 #'
+#' @param args Character vector, command line parameters (default
+#'   \code{commandArgs(trailingOnly=TRUE)})
+#' @details
+#'   run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
+#'   in shell to get a help page with available option description
 #' @examples
+#'   # from shell
+#'   # $ Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt
+#'
+#'   # from R session
 #'   ddir=system.file("data", package="dynafluxr")
 #'   meas=file.path(ddir, "data_teusink.tsv")
 #'   sto=file.path(ddir, "network_teusink.txt")
 #'   res=cli(c("-m", meas, "-s", sto, "--skip", "10"))
 #'   tp=res$mf$Time
 #'   np=length(tp)
+#'   # build tpp, fine time vector for smooth spline plotting
 #'   npp=10L # number of plot points in each tp interval
 #'   dtp=diff(tp)
 #'   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/npp, each=npp)))
 #'   # plot metabolites
 #'   matplot(tpp, res$msp(tpp), type="l")
-#'   matpoints(tp, res$mf[,-1], pch=".")
+#'   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
 #'   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6)
 #'   # plot fluxes
 #'   dev.new()
@@ -21,7 +31,7 @@
 #'   tf=as.numeric(rownames(ref)) # reference flux time points
 #'   nm_flux=colnames(bsppar(res$fsp)$qw)
 #'   itf=(tf >= min(tp) & tf <= max(tp))
-#'   matpoints(tf[itf], ref[itf, nm_flux, drop=FALSE], pch=".")
+#'   matpoints(tf[itf], ref[itf, nm_flux, drop=FALSE], pch="o", cex=0.5)
 #'   legend("topright", legend=nm_flux, lty=1:5, col=1:6)
 #'   # plot residuals
 #'   dev.new()
@@ -113,27 +123,44 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   if (!is.null(opt$constr)) {
     dfeq=read.delim(opt$constr, comment.char="#")
     lieq=lapply(colnames(mf)[-1L], function(met) as.matrix(subset(dfeq, Metabolite==met, c(Time, Value))))
+    names(lieq)=colnames(mf)[-1L]
   } else {
     lieq=NULL
   }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq)
   res
   # write result files
 }
 
 #' Retrieve flux dynamics from metabolic kinetics
 #' 
-#' @return List with names components: \itemize{
-#'   \item{\code{mf}}{: metabolite data frame used for fitting}
-#'   \item{\code{sto}}{: stoichiometric matrix used for fitting}
-#'   \item{\code{msp}}{: metabolite spline function}
-#'   \item{\code{fsp}}{: flux spline function}
-#'   \item{\code{dsp}}{: metabolite first derivative spline function}
-#'   \item{\code{rsp}}{: residual \code{dm/dt - sto%*%flux} spline function}
+#' @param mf Data-frame or matrix, metabolite kinetic measurements.
+#'   Columns must be named with metabolite names and 'Time'.
+#' @param sto Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
+#'   metabolite 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
+#'   the metabolite 'i' is consumed. Columns must be named with flux names.
+#'   Rows must be names with metabolite names.
+#' @param nsp Integer, polynomial order of B-spline to use for metabolites
+#' @param nki Integer, number of internal knots for B-splines
+#' @param lieq List, equality constraints on metabolites
+#' @details
+#'   Each item in \code{lieq} corresponds to a metabolite and is a
+#'   2 column matrix (Time, Value). Each
+#'   row of this matrix indicates what 'Value' must take corresponding
+#'   metabolite at what 'Time'. Typically, it can be used to impose
+#'   starting values at Time=0 for some metabolites.
+#' @return List with following components:
+#' \describe{
+#'   \item{mf:}{ metabolite data frame used for fitting}
+#'   \item{sto:}{ stoichiometric matrix used for fitting}
+#'   \item{msp:}{ metabolite spline function}
+#'   \item{fsp:}{ flux spline function}
+#'   \item{dsp:}{ metabolite first derivative spline function}
+#'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
 #' }
+#' @importFrom bspline fitsmbsp 
 #' @export
-
 fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
   nmet=nrow(sto)
   nflux=ncol(sto)
@@ -144,12 +171,12 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
   # generalized inverse
   s=svd(sto)
   d=s$d
-  d[d <= d[1]*1.e-10]=0.
+  d[d <= d[1L]*1.e-10]=0.
   d[d != 0.]=1./d[d != 0.]
   stoinv=s$v%*%(d*t(s$u))
   dimnames(stoinv)=rev(dimnames(sto))
 
-  msp=fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, control=list(monotone=TRUE, errx=dtp[1]/10.), lieq=lieq)
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
   # first derivatives
   dsp=dbsp(msp)
   pard=bsppar(dsp)

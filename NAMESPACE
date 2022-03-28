@@ -2,3 +2,4 @@
 
 export(cli)
 export(fdyn)
+importFrom(bspline,fitsmbsp)
