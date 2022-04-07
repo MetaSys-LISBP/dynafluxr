@@ -2,4 +2,7 @@
 
 export(cli)
 export(fdyn)
+importFrom(bspline,bsppar)
+importFrom(bspline,dbsp)
 importFrom(bspline,fitsmbsp)
+importFrom(bspline,par2bsp)

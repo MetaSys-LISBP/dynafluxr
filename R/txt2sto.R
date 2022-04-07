@@ -1,4 +1,8 @@
-# 2021-10-18 sokol@insa-toulouse.fr
+#' Translate plain text file with reactions to stoichiometric matrix
+#' 
+#' @param fn String, file name
+#' @return Matrix of size n_metab x n_reac
+#' @export
 txt2sto=function(fn) {
     #' parse txt with stoichiometric equations
     #' return stoichiometric matrix

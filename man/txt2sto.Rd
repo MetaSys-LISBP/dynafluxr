@@ -2,12 +2,16 @@
 % Please edit documentation in R/txt2sto.R
 \name{txt2sto}
 \alias{txt2sto}
-\title{parse txt with stoichiometric equations
-return stoichiometric matrix}
+\title{Translate plain text file with reactions to stoichiometric matrix}
 \usage{
 txt2sto(fn)
 }
+\arguments{
+\item{fn}{String, file name}
+}
+\value{
+Matrix of size n_metab x n_reac
+}
 \description{
-parse txt with stoichiometric equations
-return stoichiometric matrix
+Translate plain text file with reactions to stoichiometric matrix
 }

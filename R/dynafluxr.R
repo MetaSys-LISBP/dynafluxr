@@ -82,6 +82,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     ),
      make_option(c("--skip"), type="integer", default=0L,
       help="Number of first time points that should be skipped in metabolite measurements"
+    ),
+    make_option(c("--npp"), type="integer", default=10, help=
+      "Number of sub-intervals in each time interval for smooth curve plotting
+  [default %default]"
     )
   )
   parser=OptionParser(usage = "Rscript --vanilla -e 'dynafluxr::cli()' -m|--meas MEAS -s|--sto STO [options]
@@ -129,8 +133,48 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   #print(c("opt=", opt))
   res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq)
-  res
-  # write result files
+  #res
+  # write result files (bnm is a base name, dir+name without extension)
+  bnm=tools::file_path_sans_ext(opt$meas)
+  pm=bspline::bsppar(res$msp) # metab params
+  pf=bspline::bsppar(res$fsp) # flux params
+  pr=bspline::bsppar(res$rsp) # resid params
+  tp=mf[,1L]
+  tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/opt$npp, each=opt$npp)))
+  ratp=range(tp)
+  # pdf with metabs
+  pdf(paste0(bnm, ".met.pdf"))
+  mc=res$msp(tpp) # metabolite smooth curves
+  matplot(tpp, mc, xlab="Time", ylab="Concentration", type="l")
+  matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
+  legend("topright", legend=colnames(pm$qw), lty=1:5, col=1:6)
+  for (m in colnames(pm$qw)) {
+    plot(1, main=m, xlab="Time", ylab="Concentration", xlim=ratp, ylim=range(mf[,m], mc[,m]), type="n")
+    points(tp, mf[,m])
+    lines(tpp, mc[,m])
+  }
+  dev.off()
+  # pdf with fluxes
+  pdf(paste0(bnm, ".flu.pdf"))
+  fc=res$fsp(tpp) # flux smooth curves
+  matplot(tpp, fc, xlab="Time", ylab="Flux", type="l")
+  legend("topright", legend=colnames(pf$qw), lty=1:5, col=1:6)
+  for (f in colnames(pf$qw)) {
+    plot(1, main=f, xlab="Time", ylab="Flux", xlim=ratp, ylim=range(fc[,f]), type="n")
+    lines(tpp, fc[,f])
+  }
+  dev.off()
+  # pdf with residuals
+  pdf(paste0(bnm, ".res.pdf"))
+  rc=res$rsp(tpp) # residual smooth curves
+  matplot(tpp, rc, xlab="Time", ylab="dm/dt - sto\u00b7flux", type="l")
+  legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
+  for (r in colnames(pr$qw)) {
+    plot(1, main=r, xlab="Time", ylab="dm/dt - sto\u00b7flux", xlim=ratp, ylim=range(rc[,r]), type="n")
+    lines(tpp, rc[,r])
+  }
+  dev.off()
+  invisible(res)
 }
 
 #' Retrieve flux dynamics from metabolic kinetics
@@ -159,7 +203,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{dsp:}{ metabolite first derivative spline function}
 #'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
 #' }
-#' @importFrom bspline fitsmbsp 
+#' @importFrom bspline fitsmbsp dbsp bsppar par2bsp
 #' @export
 fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
   nmet=nrow(sto)
@@ -178,8 +222,8 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
 
   msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
   # first derivatives
-  dsp=dbsp(msp)
-  pard=bsppar(dsp)
+  dsp=bspline::dbsp(msp)
+  pard=bspline::bsppar(dsp)
   qwd=pard$qw
   # complete mqw2 by 0 for non measured metabs
   mfqwd=matrix(0., nrow(qwd), nmet) # 'f' for full
@@ -189,8 +233,8 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
   # calculates weights for fluxes
   qwf=mfqwd%*%t(stoinv)
   # flux splines
-  fsp=par2bsp(nsp-1L, qwf, pard$xk)
+  fsp=bspline::par2bsp(nsp-1L, qwf, pard$xk)
   # residuals dm/dt-sto*f
-  rsp=par2bsp(nsp-1L, mfqwd-qwf%*%t(sto), pard$xk)
+  rsp=bspline::par2bsp(nsp-1L, mfqwd-qwf%*%t(sto), pard$xk)
   list(mf=mf, sto=sto, msp=msp, fsp=fsp, dsp=dsp, rsp=rsp)
 }
