@@ -80,6 +80,13 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       help="Constraint file in TSV format, 3 column table: Time, Metabolite, Value.
   Metabolite names should be the same as in stoichiometric model."
     ),
+    make_option(c("--mono"), type="character",
+      help="Monotonicity file in TSV format, 2 column table: Metabolite, Value 
+  (in this order).
+  Metabolite names should be the same as in stoichiometric model. 'Value'
+  can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing). For example, Substrates that are only consumed could get more
+  realistic fit if corresponding 'Value' is set to -1."
+    ),
      make_option(c("--skip"), type="integer", default=0L,
       help="Number of first time points that should be skipped in metabolite measurements"
     ),
@@ -90,7 +97,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   )
   parser=OptionParser(usage = "Rscript --vanilla -e 'dynafluxr::cli()' -m|--meas MEAS -s|--sto STO [options]
   
-  Retrieve flux dynamics from metabolic kinetics\n
+  Retrieve flux dynamics from metabolic kinetics. Results are written in a zip file.\n
   Example: Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt", option_list=olist)
   opt <- try(parse_args(parser, args=args), silent=TRUE)
   if (inherits(opt, "try-error")) {
@@ -131,11 +138,22 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   } else {
     lieq=NULL
   }
+  # read monotonicity constraints
+  if (!is.null(opt$mono)) {
+    dfmo=read.delim(opt$mono, comment.char="#")
+    mono=structure(double(ncol(mf)-1L), names=colnames(mf)[-1L])
+    mono[dfmo[,1L]]=dfmo[,2L]
+  } else {
+    mono=0
+  }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono)
   #res
-  # write result files (bnm is a base name, dir+name without extension)
-  bnm=tools::file_path_sans_ext(opt$meas)
+  # write result files (rd is a temporary dir for results)
+  # at the end we'll move all files into a zip archive in the working dir
+  rd=tempfile(pattern="fdyn")
+  dir.create(rd)
+  #bnm=tools::file_path_sans_ext(opt$meas)
   pm=bspline::bsppar(res$msp) # metab params
   pf=bspline::bsppar(res$fsp) # flux params
   pr=bspline::bsppar(res$rsp) # resid params
@@ -143,7 +161,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/opt$npp, each=opt$npp)))
   ratp=range(tp)
   # pdf with metabs
-  pdf(paste0(bnm, ".met.pdf"))
+  pdf(file.path(rd, "met.pdf"))
   mc=res$msp(tpp) # metabolite smooth curves
   matplot(tpp, mc, xlab="Time", ylab="Concentration", type="l")
   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
@@ -155,7 +173,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   dev.off()
   # pdf with fluxes
-  pdf(paste0(bnm, ".flu.pdf"))
+  pdf(file.path(rd, "flux.pdf"))
   fc=res$fsp(tpp) # flux smooth curves
   matplot(tpp, fc, xlab="Time", ylab="Flux", type="l")
   legend("topright", legend=colnames(pf$qw), lty=1:5, col=1:6)
@@ -165,7 +183,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   dev.off()
   # pdf with residuals
-  pdf(paste0(bnm, ".res.pdf"))
+  pdf(file.path(rd, "resid.pdf"))
   rc=res$rsp(tpp) # residual smooth curves
   matplot(tpp, rc, xlab="Time", ylab="dm/dt - sto\u00b7flux", type="l")
   legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
@@ -174,6 +192,14 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     lines(tpp, rc[,r])
   }
   dev.off()
+  # tsv
+  write.table(cbind(Time=tpp, mc), file=file.path(rd, "met.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+  # .RData
+  save(res, file=file.path(rd, "env.RData"))
+  # zip files
+  zip(paste0(tools::file_path_sans_ext(opt$meas), ".zip"), rd, extra="-j")
+  unlink(rd, recursive=TRUE)
   invisible(res)
 }
 
@@ -188,12 +214,19 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @param nsp Integer, polynomial order of B-spline to use for metabolites
 #' @param nki Integer, number of internal knots for B-splines
 #' @param lieq List, equality constraints on metabolites
+#' @param monotone Numeric scalar or vector, 1=metabolites are
+#'   monotonically increasing;
+#'   -1=monotonically decreasing; 0=no constraint. If vector, each value
+#'   constraints (or not) a corresponding data column in mf ('Time'
+#'   column is excluded
+#'   from counting)
 #' @details
 #'   Each item in \code{lieq} corresponds to a metabolite and is a
 #'   2 column matrix (Time, Value). Each
 #'   row of this matrix indicates what 'Value' must take corresponding
 #'   metabolite at what 'Time'. Typically, it can be used to impose
-#'   starting values at Time=0 for some metabolites.
+#'   starting values at Time=0 for some metabolites.\cr
+#'   All metabolite fits are constraint to have values >= 0.
 #' @return List with following components:
 #' \describe{
 #'   \item{mf:}{ metabolite data frame used for fitting}
@@ -205,7 +238,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp
 #' @export
-fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
+fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
   nmet=nrow(sto)
   nflux=ncol(sto)
 
@@ -220,7 +253,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL) {
   stoinv=s$v%*%(d*t(s$u))
   dimnames(stoinv)=rev(dimnames(sto))
 
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=monotone, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
   # first derivatives
   dsp=bspline::dbsp(msp)
   pard=bspline::bsppar(dsp)
