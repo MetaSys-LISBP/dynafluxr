@@ -48,7 +48,12 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   one metabolite per column. Time column name should start with 'Time'
   and there should be only one such column.
   Metabolite names should be the same as in stoichiometric model.
-  Metabolite measurements whose name is absent in STO file, will be ignored."
+  Metabolite measurements whose name is absent in STO file, will be ignored.
+  Empty cells are interpreted as NA (non available) and not counted in spline fit.
+  If a metabolite has a full column of NA, it will be removed from stoichiometric
+  balance and thus from flux least squares. This is different from a metabolite
+  which is simply absent from measurement file. In the latter case, a metabolite
+  does account in stoichiometric balance but is considered as 0."
     ),
     make_option(c("-s", "--sto"), type="character",
       help="File name with stoichiometric model in plain text format, e.g.:
@@ -159,7 +164,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   pr=bspline::bsppar(res$rsp) # resid params
   tp=mf[,1L]
   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/opt$npp, each=opt$npp)))
-  ratp=range(tp)
+  ratp=range(tp, na.rm=TRUE)
   # pdf with metabs
   pdf(file.path(rd, "met.pdf"))
   mc=res$msp(tpp) # metabolite smooth curves
@@ -167,7 +172,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
   legend("topright", legend=colnames(pm$qw), lty=1:5, col=1:6)
   for (m in colnames(pm$qw)) {
-    plot(1, main=m, xlab="Time", ylab="Concentration", xlim=ratp, ylim=range(mf[,m], mc[,m]), type="n")
+    if (all(is.na(mf[,m])))
+      next
+    plot(1, main=m, xlab="Time", ylab="Concentration", xlim=ratp, ylim=range(mf[,m], mc[,m], na.rm=TRUE), type="n")
     points(tp, mf[,m])
     lines(tpp, mc[,m])
   }
@@ -178,7 +185,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   matplot(tpp, fc, xlab="Time", ylab="Flux", type="l")
   legend("topright", legend=colnames(pf$qw), lty=1:5, col=1:6)
   for (f in colnames(pf$qw)) {
-    plot(1, main=f, xlab="Time", ylab="Flux", xlim=ratp, ylim=range(fc[,f]), type="n")
+    plot(1, main=f, xlab="Time", ylab="Flux", xlim=ratp, ylim=range(fc[,f], na.rm=TRUE), type="n")
     lines(tpp, fc[,f])
   }
   dev.off()
@@ -188,7 +195,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   matplot(tpp, rc, xlab="Time", ylab="dm/dt - sto\u00b7flux", type="l")
   legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
   for (r in colnames(pr$qw)) {
-    plot(1, main=r, xlab="Time", ylab="dm/dt - sto\u00b7flux", xlim=ratp, ylim=range(rc[,r]), type="n")
+    plot(1, main=r, xlab="Time", ylab="dm/dt - sto\u00b7flux", xlim=ratp, ylim=range(rc[,r], na.rm=TRUE), type="n")
     lines(tpp, rc[,r])
   }
   dev.off()
@@ -239,12 +246,22 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp
 #' @export
 fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
-  nmet=nrow(sto)
-  nflux=ncol(sto)
 
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
+
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=monotone, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
+  # remove metab's NA
+  ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
+  if (length(ina)) {
+    sto=sto[-match(ina, rownames(sto)),,drop=FALSE]
+    mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
+    e=environment(msp)
+    e$qw=e$qw[,-match(ina, colnames(e$qw)),drop=FALSE]
+  }
+  nmet=nrow(sto)
+  nflux=ncol(sto)
   # generalized inverse
   s=svd(sto)
   d=s$d
@@ -252,8 +269,6 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
   d[d != 0.]=1./d[d != 0.]
   stoinv=s$v%*%(d*t(s$u))
   dimnames(stoinv)=rev(dimnames(sto))
-
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=monotone, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
   # first derivatives
   dsp=bspline::dbsp(msp)
   pard=bspline::bsppar(dsp)
@@ -269,5 +284,5 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
   fsp=bspline::par2bsp(nsp-1L, qwf, pard$xk)
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, mfqwd-qwf%*%t(sto), pard$xk)
-  list(mf=mf, sto=sto, msp=msp, fsp=fsp, dsp=dsp, rsp=rsp)
+  list(mf=mf, sto=sto, invsto=stoinv, msp=msp, fsp=fsp, dsp=dsp, rsp=rsp)
 }
