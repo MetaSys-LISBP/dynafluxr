@@ -37,6 +37,9 @@
 #'   dev.new()
 #'   matplot(tpp, res$rsp(tpp), type="l")
 #'   legend("topright", legend=colnames(bsppar(res$rsp)$qw), lty=1:5, col=1:6)
+#' @importFrom qpdf pdf_combine
+#' @importFrom bspline bsppar
+#' @importFrom grDevices cairo_pdf
 #' @export
 cli=function(args=commandArgs(trailingOnly=TRUE)) {
   #stopifnot(requireNamespace("optparse", quite=TRUE))
@@ -92,7 +95,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing). For example, Substrates that are only consumed could get more
   realistic fit if corresponding 'Value' is set to -1."
     ),
-     make_option(c("--skip"), type="integer", default=0L,
+    make_option(c("--skip"), type="integer", default=0L,
+      help="Number of first time points that should be skipped in metabolite measurements"
+    ),
+    make_option(c("-z", "--zip"), action="store_true", default=FALSE,
       help="Number of first time points that should be skipped in metabolite measurements"
     ),
     make_option(c("--npp"), type="integer", default=10, help=
@@ -156,8 +162,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
-  rd=tempfile(pattern="fdyn")
-  dir.create(rd)
+  #rd=tempfile(pattern="fdyn")
+  rd=tools::file_path_sans_ext(opt$meas)
+  if (!dir.exists(rd))
+    dir.create(rd)
   #bnm=tools::file_path_sans_ext(opt$meas)
   pm=bspline::bsppar(res$msp) # metab params
   pf=bspline::bsppar(res$fsp) # flux params
@@ -189,13 +197,26 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     lines(tpp, fc[,f])
   }
   dev.off()
+  # pdf with restored (integrated) metabs
+  grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
+  ic=res$isp(tpp) # imet smooth curves
+  matplot(tpp, ic, xlab="Time", ylab="\u222bS\u00b7f dt", type="l")
+  legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
+  for (r in colnames(pr$qw)) {
+    plot(1, main=r, xlab="Time", ylab="\u222bS\u00b7f dt", xlim=ratp, ylim=range(ic[,r], na.rm=TRUE), type="n")
+    lines(tpp, ic[,r])
+  }
+  dev.off()
+  li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
+  qpdf::pdf_combine(input=li, output=file.path(rd, "imet.pdf"))
+  unlink(li)
   # pdf with residuals
   pdf(file.path(rd, "resid.pdf"))
   rc=res$rsp(tpp) # residual smooth curves
-  matplot(tpp, rc, xlab="Time", ylab="dm/dt - sto\u00b7flux", type="l")
+  matplot(tpp, rc, xlab="Time", ylab="dm/dt - S\u00b7f", type="l")
   legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
   for (r in colnames(pr$qw)) {
-    plot(1, main=r, xlab="Time", ylab="dm/dt - sto\u00b7flux", xlim=ratp, ylim=range(rc[,r], na.rm=TRUE), type="n")
+    plot(1, main=r, xlab="Time", ylab="dm/dt - S\u00b7f", xlim=ratp, ylim=range(rc[,r], na.rm=TRUE), type="n")
     lines(tpp, rc[,r])
   }
   dev.off()
@@ -205,8 +226,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   # .RData
   save(res, file=file.path(rd, "env.RData"))
   # zip files
-  zip(paste0(tools::file_path_sans_ext(opt$meas), ".zip"), rd, extra="-j")
-  unlink(rd, recursive=TRUE)
+  if (opt$zip) {
+    zip(paste0(rd, ".zip"), rd, extra="-j")
+    unlink(rd, recursive=TRUE)
+  }
   invisible(res)
 }
 
@@ -260,6 +283,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
     e=environment(msp)
     e$qw=e$qw[,-match(ina, colnames(e$qw)),drop=FALSE]
   }
+  parm=bspline::bsppar(msp)
   nmet=nrow(sto)
   nflux=ncol(sto)
   # generalized inverse
@@ -282,7 +306,12 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
   qwf=mfqwd%*%t(stoinv)
   # flux splines
   fsp=bspline::par2bsp(nsp-1L, qwf, pard$xk)
+  # metab restored from S*f
+  qwm=qwf%*%t(sto)
+  const=setNames(double(ncol(qwm)), colnames(qwm))
+  const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+  isp=ibsp(bspline::par2bsp(nsp-1L, qwm, pard$xk), const=const)
   # residuals dm/dt-sto*f
-  rsp=bspline::par2bsp(nsp-1L, mfqwd-qwf%*%t(sto), pard$xk)
-  list(mf=mf, sto=sto, invsto=stoinv, msp=msp, fsp=fsp, dsp=dsp, rsp=rsp)
+  rsp=bspline::par2bsp(nsp-1L, mfqwd-qwm, pard$xk)
+  list(mf=mf, sto=sto, invsto=stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)
 }

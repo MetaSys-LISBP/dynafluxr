@@ -4,7 +4,7 @@
 \alias{fdyn}
 \title{Retrieve flux dynamics from metabolic kinetics}
 \usage{
-fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL)
+fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL, monotone = 0)
 }
 \arguments{
 \item{mf}{Data-frame or matrix, metabolite kinetic measurements.
@@ -20,6 +20,13 @@ Rows must be names with metabolite names.}
 \item{nki}{Integer, number of internal knots for B-splines}
 
 \item{lieq}{List, equality constraints on metabolites}
+
+\item{monotone}{Numeric scalar or vector, 1=metabolites are
+monotonically increasing;
+-1=monotonically decreasing; 0=no constraint. If vector, each value
+constraints (or not) a corresponding data column in mf ('Time'
+column is excluded
+from counting)}
 }
 \value{
 List with following components:
@@ -40,5 +47,6 @@ Each item in \code{lieq} corresponds to a metabolite and is a
   2 column matrix (Time, Value). Each
   row of this matrix indicates what 'Value' must take corresponding
   metabolite at what 'Time'. Typically, it can be used to impose
-  starting values at Time=0 for some metabolites.
+  starting values at Time=0 for some metabolites.\cr
+  All metabolite fits are constraint to have values >= 0.
 }
