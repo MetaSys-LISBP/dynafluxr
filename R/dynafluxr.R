@@ -92,14 +92,21 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       help="Monotonicity file in TSV format, 2 column table: Metabolite, Value 
   (in this order).
   Metabolite names should be the same as in stoichiometric model. 'Value'
-  can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing). For example, Substrates that are only consumed could get more
+  can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing).
+  For example, substrates that are only consumed could get more
   realistic fit if corresponding 'Value' is set to -1."
+    ),
+    make_option(c("-o", "--out"), type="character",
+      help="Directory (or zip) name to use for result files. By default, measurement name without extension is used."
     ),
     make_option(c("--skip"), type="integer", default=0L,
       help="Number of first time points that should be skipped in metabolite measurements"
     ),
     make_option(c("-z", "--zip"), action="store_true", default=FALSE,
-      help="Number of first time points that should be skipped in metabolite measurements"
+      help="Create zip archive with results."
+    ),
+    make_option(c("--ils"), action="store_true", default=FALSE,
+      help="ils Least Squares formulation"
     ),
     make_option(c("--npp"), type="integer", default=10, help=
       "Number of sub-intervals in each time interval for smooth curve plotting
@@ -158,32 +165,38 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     mono=0
   }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, ils=opt$ils)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
   #rd=tempfile(pattern="fdyn")
-  rd=tools::file_path_sans_ext(opt$meas)
+  if (is.null(opt$out)) {
+    rd=tools::file_path_sans_ext(opt$meas)
+  } else {
+    rd=opt$out
+  }
   if (!dir.exists(rd))
     dir.create(rd)
   #bnm=tools::file_path_sans_ext(opt$meas)
   pm=bspline::bsppar(res$msp) # metab params
   pf=bspline::bsppar(res$fsp) # flux params
   pr=bspline::bsppar(res$rsp) # resid params
+  pi=bspline::bsppar(res$isp) # resid params
   tp=mf[,1L]
   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/opt$npp, each=opt$npp)))
   ratp=range(tp, na.rm=TRUE)
   # pdf with metabs
   pdf(file.path(rd, "met.pdf"))
   mc=res$msp(tpp) # metabolite smooth curves
-  matplot(tpp, mc, xlab="Time", ylab="Concentration", type="l")
+  plot(1, xlim=ratp, main="Measured concentrations fitted by B-splines", ylim=range(mc, mf[,-1L], na.rm=TRUE), xlab="Time", ylab="Concentration", t="n")
+  matlines(tpp, mc)
   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
   legend("topright", legend=colnames(pm$qw), lty=1:5, col=1:6)
   for (m in colnames(pm$qw)) {
     if (all(is.na(mf[,m])))
       next
     plot(1, main=m, xlab="Time", ylab="Concentration", xlim=ratp, ylim=range(mf[,m], mc[,m], na.rm=TRUE), type="n")
-    points(tp, mf[,m])
+    points(tp, mf[,m], pch="o", cex=0.5)
     lines(tpp, mc[,m])
   }
   dev.off()
@@ -200,11 +213,18 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   # pdf with restored (integrated) metabs
   grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
   ic=res$isp(tpp) # imet smooth curves
-  matplot(tpp, ic, xlab="Time", ylab="\u222bS\u00b7f dt", type="l")
+  plot(1, main="Estimated concentrations", xlim=ratp, ylim=range(ic, mf[,-1L], na.rm=TRUE), xlab="Time", ylab="\u222bS\u00b7f dt", t="n")
+  matlines(tpp, ic)
+  tmp=matrix(NA_real_, nrow(mf), ncol(ic)) # inject here mf values
+  colnames(tmp)=colnames(ic)
+  cnm=intersect(colnames(mf)[-1L], colnames(ic)) # NA columns in mf are absent in ic
+  tmp[,cnm]=as.matrix(mf[,cnm])
+  matpoints(tp, tmp, pch="o", cex=0.5)
   legend("topright", legend=colnames(pr$qw), lty=1:5, col=1:6)
-  for (r in colnames(pr$qw)) {
-    plot(1, main=r, xlab="Time", ylab="\u222bS\u00b7f dt", xlim=ratp, ylim=range(ic[,r], na.rm=TRUE), type="n")
-    lines(tpp, ic[,r])
+  for (m in colnames(pi$qw)) {
+    plot(1, main=m, xlab="Time", ylab="\u222bS\u00b7f dt", xlim=ratp, ylim=range(ic[,m], tmp[,m], na.rm=TRUE), type="n")
+    lines(tpp, ic[, m])
+    points(tp, tmp[, m], pch="o", cex=0.55)
   }
   dev.off()
   li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
@@ -268,12 +288,12 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp
 #' @export
-fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
+fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
 
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
-
+  # fit measured metabs
   msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=monotone, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
@@ -286,32 +306,89 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0) {
   parm=bspline::bsppar(msp)
   nmet=nrow(sto)
   nflux=ncol(sto)
-  # generalized inverse
-  s=svd(sto)
-  d=s$d
-  d[d <= d[1L]*1.e-10]=0.
-  d[d != 0.]=1./d[d != 0.]
-  stoinv=s$v%*%(d*t(s$u))
-  dimnames(stoinv)=rev(dimnames(sto))
+  nwm=nrow(parm$qw)
   # first derivatives
   dsp=bspline::dbsp(msp)
   pard=bspline::bsppar(dsp)
   qwd=pard$qw
-  # complete mqw2 by 0 for non measured metabs
-  mfqwd=matrix(0., nrow(qwd), nmet) # 'f' for full
-  colnames(mfqwd)=rownames(sto)
-  mfqwd[,colnames(qwd)]=qwd
+  nwf=nrow(pard$qw)
+  # complete derivatives by 0 for non measured metabs
+  qwd0=matrix(0., nrow(qwd), nmet)
+  colnames(qwd0)=rownames(sto)
+  qwd0[,colnames(qwd)]=qwd
 
   # calculates weights for fluxes
-  qwf=mfqwd%*%t(stoinv)
+  if (ils) {
+    # build integral LS
+    # qwm0: metab coeffs including 0s
+    qwm0=matrix(0., nrow=nwm, ncol=nmet)
+    colnames(qwm0)=rownames(sto)
+    qwm0[,colnames(parm$qw)]=parm$qw
+    # unknowns: qwf and mstart
+    mstart=setNames(double(nmet), colnames(qwm0))
+    mstart[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+    # integration matrix (cumsum(...))
+    ima=diag(nrow=nwm-1)
+    ima=(row(ima)>=col(ima))+0.
+    ima=rbind(0., arrApply::arrApply(ima, 2, "multv", v=diff(pard$xk, lag=nsp)/nsp))
+    # f2m: ima%*%qwf%*%t(sto)+rep(1,nkmet)%o%mstart
+    jqw=aperm(ima%o%t(sto), c(1L,4L,2L,3L))
+    dim(jqw)=c(prod(dim(jqw)[1L:2L]), prod(dim(jqw)[3L:4L]))
+    jadd=rep(1., nrow(ima))%o%diag(nrow=nmet)
+    dim(jadd)=c(nrow(ima)*nmet, nmet)
+    jtot=cbind(jadd, jqw)
+    # inequalities: qwm >= 0; dm/dt monotone for some metabs
+    if (any(monotone != 0)) {
+      if (length(monotone) == 1L)
+        monotone=setNames(rep(monotone, nmet), rownames(sto))
+      i=names(which(monotone > 0))
+      umono=aperm(diag(nrow=nwf)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
+      dim(umono)=c(nwf*length(i), nwf*nflux)
+      i=names(which(monotone < 0))
+      tmp=aperm(diag(nrow=nwf)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
+      dim(tmp)=c(nwf*length(i), nwf*nflux)
+      umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
+      cmono=double(nrow(umono))
+    } else {
+      umono=NULL
+      cmono=NULL
+    }
+    # positivity matrix u is the same as jtot
+    u=rbind(jtot, umono)
+    co=double(nrow(u))
+    # solve iLS
+    st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
+    icnst=seq_len(nmet)
+    mst=p[icnst]
+    qwf=p[-icnst]
+    dim(qwf)=c(nwf, nflux)
+    colnames(qwf)=colnames(sto)
+  } else {
+    # differential LS
+    # generalized inverse
+    st=system.time({
+    s=svd(sto)
+    d=s$d
+    d[d <= d[1L]*1.e-10]=0.
+    d[d != 0.]=1./d[d != 0.]
+    stoinv=s$v%*%(d*t(s$u))
+    dimnames(stoinv)=rev(dimnames(sto))
+    qwf=qwd0%*%t(stoinv)
+    })
+  }
+  #print(st)
   # flux splines
   fsp=bspline::par2bsp(nsp-1L, qwf, pard$xk)
   # metab restored from S*f
-  qwm=qwf%*%t(sto)
-  const=setNames(double(ncol(qwm)), colnames(qwm))
-  const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
-  isp=ibsp(bspline::par2bsp(nsp-1L, qwm, pard$xk), const=const)
+  qwde=qwf%*%t(sto) # dm/dt estimated from fluxes
+  if (ils) {
+    const=mst
+  } else {
+    const=setNames(double(nmet), colnames(qwde))
+    const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+  }
+  isp=ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
   # residuals dm/dt-sto*f
-  rsp=bspline::par2bsp(nsp-1L, mfqwd-qwm, pard$xk)
-  list(mf=mf, sto=sto, invsto=stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)
+  rsp=bspline::par2bsp(nsp-1L, qwd0-qwde, pard$xk)
+  list(mf=mf, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)
 }
