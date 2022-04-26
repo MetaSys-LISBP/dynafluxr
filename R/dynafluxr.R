@@ -242,9 +242,27 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   dev.off()
   # tsv
   write.table(cbind(Time=tpp, mc), file=file.path(rd, "met.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(cbind(Time=tpp, ic), file=file.path(rd, "imet.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
   write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
   # .RData
   save(res, file=file.path(rd, "env.RData"))
+  # Readme.md
+  cat(file=file.path(rd, "Readme.md"), sep="\n",
+    "# Retrieving flux dynamics from metabolite kinetics (dynafluxr results)", "",
+    paste0("This is the result files produced by dynafluxr R package on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
+    "The command to reproduce these results is:", "",
+    paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
+    "", "##File contents", "",
+    " - `met.pdf`: concentration plots vs Time (fitted by B-spline);",
+    " - `imet.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7f*);",
+    " - `flux.pdf`: estimated flux plots vs Time (by solving least squares);",
+    " - `resid.pdf`: residuals *dm/dt - S\u00b7f* plots vs Time;",
+    " - `met.tsv`: concentration table;",
+    " - `imet.tsv`: estimated concentration table;",
+    " - `flux.tsv`: flux table;",
+    " - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('env.RData', envir=e)` and then accessed as e.g. `ls(e$res)`;",
+    " - `Readme.md`: this file;"
+  )
   # zip files
   if (opt$zip) {
     zip(paste0(rd, ".zip"), rd, extra="-j")
@@ -286,7 +304,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{dsp:}{ metabolite first derivative spline function}
 #'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
 #' }
-#' @importFrom bspline fitsmbsp dbsp bsppar par2bsp
+#' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @export
 fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
 
@@ -387,7 +405,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
     const=setNames(double(nmet), colnames(qwde))
     const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
   }
-  isp=ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
+  isp=bspline::ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde, pard$xk)
   list(mf=mf, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)

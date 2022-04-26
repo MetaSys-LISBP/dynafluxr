@@ -4,7 +4,7 @@
 \alias{fdyn}
 \title{Retrieve flux dynamics from metabolic kinetics}
 \usage{
-fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL, monotone = 0)
+fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL, monotone = 0, ils = FALSE)
 }
 \arguments{
 \item{mf}{Data-frame or matrix, metabolite kinetic measurements.
