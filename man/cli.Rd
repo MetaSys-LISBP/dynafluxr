@@ -26,12 +26,9 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   meas=file.path(ddir, "data_teusink.tsv")
   sto=file.path(ddir, "network_teusink.txt")
   res=cli(c("-m", meas, "-s", sto, "--skip", "10"))
-  tp=res$mf$Time
+  tp=res$tp
   np=length(tp)
-  # build tpp, fine time vector for smooth spline plotting
-  npp=10L # number of plot points in each tp interval
-  dtp=diff(tp)
-  tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/npp, each=npp)))
+  tpp=res$tpp
   # plot metabolites
   matplot(tpp, res$msp(tpp), type="l")
   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)

@@ -14,12 +14,9 @@
 #'   meas=file.path(ddir, "data_teusink.tsv")
 #'   sto=file.path(ddir, "network_teusink.txt")
 #'   res=cli(c("-m", meas, "-s", sto, "--skip", "10"))
-#'   tp=res$mf$Time
+#'   tp=res$tp
 #'   np=length(tp)
-#'   # build tpp, fine time vector for smooth spline plotting
-#'   npp=10L # number of plot points in each tp interval
-#'   dtp=diff(tp)
-#'   tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/npp, each=npp)))
+#'   tpp=res$tpp
 #'   # plot metabolites
 #'   matplot(tpp, res$msp(tpp), type="l")
 #'   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
@@ -88,6 +85,11 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       help="Constraint file in TSV format, 3 column table: Time, Metabolite, Value.
   Metabolite names should be the same as in stoichiometric model."
     ),
+    make_option(c("-l", "--label"), type="character",
+      help="Label length file in TSV format, 2 column table: Compound, Label_length (in this order).
+  Compound names should be the same as in stoichiometric model. Label_length
+  column must contain integer non negative values."
+    ),
     make_option(c("--mono"), type="character",
       help="Monotonicity file in TSV format, 2 column table: Metabolite, Value 
   (in this order).
@@ -115,7 +117,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   )
   parser=OptionParser(usage = "Rscript --vanilla -e 'dynafluxr::cli()' -m|--meas MEAS -s|--sto STO [options]
   
-  Retrieve flux dynamics from metabolic kinetics. Results are written in a zip file.\n
+  Retrieve flux dynamics from metabolic kinetics. Results are written in a directory or zip file.\n
   Example: Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt", option_list=olist)
   opt <- try(parse_args(parser, args=args), silent=TRUE)
   if (inherits(opt, "try-error")) {
@@ -124,7 +126,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       mes=strsplit(opt, " : ")[[1L]]
       message("Error: ", mes[length(mes)])
     }
-    stop(.call=FALSE)
+    #stop(.call=FALSE)
+    q("no", status=1)
   }
   # mandatory arguments
   if (is.null(opt$meas)) {
@@ -159,13 +162,21 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   # read monotonicity constraints
   if (!is.null(opt$mono)) {
     dfmo=read.delim(opt$mono, comment.char="#")
-    mono=structure(double(ncol(mf)-1L), names=colnames(mf)[-1L])
+    mono=setNames(double(nrow(sto)), rownames(sto))
     mono[dfmo[,1L]]=dfmo[,2L]
   } else {
     mono=0
   }
+  # read label lengths
+  if (!is.null(opt$label)) {
+    dlab=read.delim(opt$label, comment.char="#")
+    lablen=setNames(double(nrow(sto)), rownames(sto))
+    lablen[dlab[,1L]]=dlab[,2L]
+  } else {
+    lablen=NULL
+  }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, ils=opt$ils)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, ils=opt$ils, lablen=lablen, npp=opt$npp)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -182,8 +193,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   pf=bspline::bsppar(res$fsp) # flux params
   pr=bspline::bsppar(res$rsp) # resid params
   pi=bspline::bsppar(res$isp) # resid params
-  tp=mf[,1L]
-  tpp=tp[1L]+c(0.,cumsum(rep(diff(tp)/opt$npp, each=opt$npp)))
+  tp=res$tp
+  tpp=res$tpp
   ratp=range(tp, na.rm=TRUE)
   # pdf with metabs
   pdf(file.path(rd, "met.pdf"))
@@ -200,6 +211,21 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     lines(tpp, mc[,m])
   }
   dev.off()
+  # pdf with label balance
+  if (length(lablen) > 0L) {
+    pdf(file.path(rd, "label.pdf"))
+    dlab=colSums(t(mf[,-1L])*lablen[colnames(mf)[-1L]], na.rm=TRUE)
+    lc=res$lsp(tpp)
+    ilc=res$ilsp(tpp)
+    plot(1, xlim=ratp, main="Label evolution", ylim=range(lc, ilc, dlab, na.rm=TRUE), xlab="Time", ylab="Total label", t="n")
+    matlines(tpp, cbind(lc, ilc))
+    points(tp, dlab, pch="o", cex=0.5)
+    legend("topright", legend=c("fitted compounds", "integrated compounds"), lty=1:2, col=1:2)
+    dev.off()
+    labline=" - `label.pdf`: label plots vs Time;"
+  } else {
+    labline=NULL
+  }
   # pdf with fluxes
   pdf(file.path(rd, "flux.pdf"))
   fc=res$fsp(tpp) # flux smooth curves
@@ -255,6 +281,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     "", "##File contents", "",
     " - `met.pdf`: concentration plots vs Time (fitted by B-spline);",
     " - `imet.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7f*);",
+    labline,
     " - `flux.pdf`: estimated flux plots vs Time (by solving least squares);",
     " - `resid.pdf`: residuals *dm/dt - S\u00b7f* plots vs Time;",
     " - `met.tsv`: concentration table;",
@@ -280,14 +307,26 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   the metabolite 'i' is consumed. Columns must be named with flux names.
 #'   Rows must be names with metabolite names.
 #' @param nsp Integer, polynomial order of B-spline to use for metabolites
+#'   (default 4)
 #' @param nki Integer, number of internal knots for B-splines
+#'   (default 5)
 #' @param lieq List, equality constraints on metabolites
+#'   (default NULL, i.e. no equality constraints)
 #' @param monotone Numeric scalar or vector, 1=metabolites are
 #'   monotonically increasing;
 #'   -1=monotonically decreasing; 0=no constraint. If vector, each value
 #'   constraints (or not) a corresponding data column in mf ('Time'
 #'   column is excluded
 #'   from counting)
+#'   (default 0, i.e. no monotonicity constraints)
+#' @param ils Logical scalar, if TRUE, indicates that integral least squares
+#'   should be resolved instead of differential least squares.
+#'   (default FALSE, i.e. dLS will be used)
+#' @param lablen Numerical named vector, indicates what is label length
+#'   of a given compound used a vector item name. If provided, results
+#'   will contain \code{lsp} and \code{ilsp} fields which
+#'   are a B-spline function representing label balance over msp and isp splines.
+#'   (default NULL, i.e. no label balance will be provided)
 #' @details
 #'   Each item in \code{lieq} corresponds to a metabolite and is a
 #'   2 column matrix (Time, Value). Each
@@ -298,21 +337,32 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @return List with following components:
 #' \describe{
 #'   \item{mf:}{ metabolite data frame used for fitting}
+#'   \item{tp:}{ vector of time points for used measurements}
+#'   \item{tpp:}{ vector of time points for plot (fine time resolution)}
 #'   \item{sto:}{ stoichiometric matrix used for fitting}
 #'   \item{msp:}{ metabolite spline function}
+#'   \item{isp:}{ integrated metabolite spline function}
+#'   \item{lsp:}{ label balance over msp spline function}
+#'   \item{ilsp:}{ label balance over isp spline function}
 #'   \item{fsp:}{ flux spline function}
 #'   \item{dsp:}{ metabolite first derivative spline function}
 #'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @export
-fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
+fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, lablen=NULL, npp=10L) {
 
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
+  tpp=tp[1L]+c(0.,cumsum(rep(dtp/npp, each=npp)))
   # fit measured metabs
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=monotone, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=dtp[1]/10., trace=1))
+  if (length(monotone) > 1L) {
+    mono=monotone[colnames(mf)[-1L]]
+  } else {
+    mono=monotone
+  }
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=min(dtp[dtp != 0], na.rm=TRUE)/10., trace=1))
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
@@ -357,12 +407,15 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
     jtot=cbind(jadd, jqw)
     # inequalities: qwm >= 0; dm/dt monotone for some metabs
     if (any(monotone != 0)) {
-      if (length(monotone) == 1L)
-        monotone=setNames(rep(monotone, nmet), rownames(sto))
-      i=names(which(monotone > 0))
+      if (length(monotone) == 1L) {
+        mono=setNames(rep(monotone, nmet), rownames(sto))
+      } else {
+        mono=monotone[rownames(sto)]
+      }
+      i=names(which(mono > 0))
       umono=aperm(diag(nrow=nwf)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
       dim(umono)=c(nwf*length(i), nwf*nflux)
-      i=names(which(monotone < 0))
+      i=names(which(mono < 0))
       tmp=aperm(diag(nrow=nwf)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
       dim(tmp)=c(nwf*length(i), nwf*nflux)
       umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
@@ -376,6 +429,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
     co=double(nrow(u))
     # solve iLS
     st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
+    # extract mst and qwf
     icnst=seq_len(nmet)
     mst=p[icnst]
     qwf=p[-icnst]
@@ -383,7 +437,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
     colnames(qwf)=colnames(sto)
   } else {
     # differential LS
-    # generalized inverse
+    # generalized sto inverse
     st=system.time({
     s=svd(sto)
     d=s$d
@@ -391,6 +445,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
     d[d != 0.]=1./d[d != 0.]
     stoinv=s$v%*%(d*t(s$u))
     dimnames(stoinv)=rev(dimnames(sto))
+    # solve dLS
     qwf=qwd0%*%t(stoinv)
     })
   }
@@ -408,5 +463,14 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE) {
   isp=bspline::ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde, pard$xk)
-  list(mf=mf, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp)
+  # label balance
+  if (length(lablen)) {
+    lsp=bspline::par2bsp(nsp, colSums(t(parm$qw)*lablen[colnames(parm$qw)]), parm$xk)
+    pari=bspline::bsppar(isp)
+    ilsp=bspline::par2bsp(nsp, colSums(t(pari$qw)*lablen[colnames(pari$qw)]), pari$xk)
+    res$lsp=lsp
+    res$ilsp=ilsp
+  }
+  res
 }

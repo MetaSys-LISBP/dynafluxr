@@ -4,7 +4,17 @@
 \alias{fdyn}
 \title{Retrieve flux dynamics from metabolic kinetics}
 \usage{
-fdyn(mf, sto, nsp = 4L, nki = 5L, lieq = NULL, monotone = 0, ils = FALSE)
+fdyn(
+  mf,
+  sto,
+  nsp = 4L,
+  nki = 5L,
+  lieq = NULL,
+  monotone = 0,
+  ils = FALSE,
+  lablen = NULL,
+  npp = 10L
+)
 }
 \arguments{
 \item{mf}{Data-frame or matrix, metabolite kinetic measurements.
@@ -15,25 +25,44 @@ metabolite 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
 the metabolite 'i' is consumed. Columns must be named with flux names.
 Rows must be names with metabolite names.}
 
-\item{nsp}{Integer, polynomial order of B-spline to use for metabolites}
+\item{nsp}{Integer, polynomial order of B-spline to use for metabolites
+(default 4)}
 
-\item{nki}{Integer, number of internal knots for B-splines}
+\item{nki}{Integer, number of internal knots for B-splines
+(default 5)}
 
-\item{lieq}{List, equality constraints on metabolites}
+\item{lieq}{List, equality constraints on metabolites
+(default NULL, i.e. no equality constraints)}
 
 \item{monotone}{Numeric scalar or vector, 1=metabolites are
 monotonically increasing;
 -1=monotonically decreasing; 0=no constraint. If vector, each value
 constraints (or not) a corresponding data column in mf ('Time'
 column is excluded
-from counting)}
+from counting)
+(default 0, i.e. no monotonicity constraints)}
+
+\item{ils}{Logical scalar, if TRUE, indicates that integral least squares
+should be resolved instead of differential least squares.
+(default FALSE, i.e. dLS will be used)}
+
+\item{lablen}{Numerical named vector, indicates what is label length
+of a given compound used a vector item name. If provided, results
+will contain \code{lsp} and \code{ilsp} fields which
+are a B-spline function representing label balance over msp and isp splines.
+(default NULL, i.e. no label balance will be provided)}
 }
 \value{
 List with following components:
 \describe{
   \item{mf:}{ metabolite data frame used for fitting}
+  \item{tp:}{ vector of time points for used measurements}
+  \item{tpp:}{ vector of time points for plot (fine time resolution)}
   \item{sto:}{ stoichiometric matrix used for fitting}
   \item{msp:}{ metabolite spline function}
+  \item{isp:}{ integrated metabolite spline function}
+  \item{lsp:}{ label balance over msp spline function}
+  \item{ilsp:}{ label balance over isp spline function}
   \item{fsp:}{ flux spline function}
   \item{dsp:}{ metabolite first derivative spline function}
   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
