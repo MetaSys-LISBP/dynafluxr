@@ -32,7 +32,7 @@ Rows must be names with metabolite names.}
 (default 5)}
 
 \item{lieq}{List, equality constraints on metabolites
-(default NULL, i.e. no equality constraints)}
+(default NULL, i.e. no equality constraint)}
 
 \item{monotone}{Numeric scalar or vector, 1=metabolites are
 monotonically increasing;
@@ -40,7 +40,7 @@ monotonically increasing;
 constraints (or not) a corresponding data column in mf ('Time'
 column is excluded
 from counting)
-(default 0, i.e. no monotonicity constraints)}
+(default 0, i.e. no monotonicity constraint)}
 
 \item{ils}{Logical scalar, if TRUE, indicates that integral least squares
 should be resolved instead of differential least squares.
@@ -59,13 +59,15 @@ List with following components:
   \item{tp:}{ vector of time points for used measurements}
   \item{tpp:}{ vector of time points for plot (fine time resolution)}
   \item{sto:}{ stoichiometric matrix used for fitting}
-  \item{msp:}{ metabolite spline function}
+  \item{invsto:}{ pseudo-inverse of stoichiometric matrix}
+  \item{msp:}{ measured metabolite spline function}
   \item{isp:}{ integrated metabolite spline function}
   \item{lsp:}{ label balance over msp spline function}
   \item{ilsp:}{ label balance over isp spline function}
   \item{fsp:}{ flux spline function}
-  \item{dsp:}{ metabolite first derivative spline function}
+  \item{dsp:}{ measured metabolite first derivative spline function}
   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
+  \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
 }
 }
 \description{

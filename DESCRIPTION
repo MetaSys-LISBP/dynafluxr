@@ -1,7 +1,7 @@
 Package: dynafluxr
 Type: Package
 Title: Retrive Flux Dynamics from Metabolic Kinetic Measurements
-Version: 0.8.0
+Version: 0.9.0
 Author: Serguei Sokol <sokol@insa-toulouse.fr>
 Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
 Description: Flux dynamics can be retrieved from kinetic measurements
