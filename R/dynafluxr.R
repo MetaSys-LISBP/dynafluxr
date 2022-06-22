@@ -197,10 +197,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   if (!dir.exists(rd))
     dir.create(rd)
   #bnm=tools::file_path_sans_ext(opt$meas)
-  pm=bspline::bsppar(res$msp) # metab params
-  pf=bspline::bsppar(res$fsp) # flux params
-  pr=bspline::bsppar(res$rsp) # resid params
-  pi=bspline::bsppar(res$isp) # resid params
+  #pm=bspline::bsppar(res$msp) # metab params
+  #pf=bspline::bsppar(res$fsp) # flux params
+  #pr=bspline::bsppar(res$rsp) # resid params
+  #pi=bspline::bsppar(res$isp) # resid params
   tp=res$tp
   tpp=res$tpp
   ratp=range(tp, na.rm=TRUE)
@@ -223,7 +223,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     matlines(tpp, mc)
     if (!is.null(data))
       matpoints(tp, data, pch="o", cex=0.5)
-    legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6)
+    legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6, bg=rgb(1,1,1,0.3))
     # multi-color sd-bands
     if (!is.null(p$sdqw)) {
       for (im in seq_along(colnames(p$qw))) {
@@ -264,7 +264,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE), xlab="Time", ylab="Total atom number", t="n")
     matlines(tpp, cbind(ac, iac))
     points(tp, datom, pch="o", cex=0.5)
-    legend("topright", legend=c("fitted species", "integrated species"), lty=1:2, col=1:2)
+    legend("topright", legend=c("fitted species", "integrated species"), bg=rgb(1,1,1,0.3), lty=1:2, col=1:2)
     dev.off()
     atomline=" - `atom.pdf`: atom balance plots;"
   } else {
@@ -371,8 +371,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
+#' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
 #' @export
-fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen=NULL, npp=10L) {
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen=NULL, npp=10L) {
 
   tp=mf$Time
   dtp=diff(tp)
@@ -389,7 +390,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
     #browser()
-    sto=sto[-match(ina, rownames(sto)),,drop=FALSE]
+    sto=stofull[-match(ina, rownames(stofull)),,drop=FALSE]
     mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
     e=environment(msp)
     ibad=match(ina, colnames(e$qw))
@@ -399,6 +400,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen
   }
   parm=bspline::bsppar(msp)
   nmet=nrow(sto)
+  nmetfull=nrow(stofull)
   nflux=ncol(sto)
   nwm=nrow(parm$qw)
   # first derivatives
@@ -414,7 +416,7 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen
   # calculates weights for fluxes
   if (ils) {
     # build integral LS
-    # qwm0: metab coeffs including 0s
+    # qwm0: metab coeffs including 0s, it will be rhs
     qwm0=matrix(0., nrow=nwm, ncol=nmet)
     colnames(qwm0)=rownames(sto)
     qwm0[,colnames(parm$qw)]=parm$qw
@@ -458,10 +460,29 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen
     # extract mst and qwf
     icnst=seq_len(nmet)
     mst=p[icnst]
+    names(mst)=rownames(sto)
     qwf=p[-icnst]
     dim(qwf)=c(nwf, nflux)
     colnames(qwf)=colnames(sto)
-    sdfl=NULL
+    # find sd
+    ## cov of rhs
+    covm0=slam::simple_triplet_zero_matrix(prod(dim(qwm0)))
+    nqr=nrow(qwm0)
+    iqr=seq_len(nqr)
+    for (m in colnames(parm$qw)) {
+      im=match(m, colnames(qwm0))
+      i=(im-1L)*nqr+iqr
+      covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
+    }
+    ## sdv of jtot
+    s=base::svd(jtot) # it is supposed to be full rank, otherwise lsi() would stop already
+    jinv=tcrossprod(arrApply::arrApply(s$v, 2, "multv", v=1./s$d), s$u) # generalized inverse of jtot
+    sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
+    # extract sd of mst and qwf
+    sdmst=sdp[icnst]
+    sdfl=sdp[-icnst]
+    dim(sdfl)=c(nwf, nflux)
+    colnames(sdfl)=colnames(sto)
   } else {
     # differential LS
     # generalized sto inverse
@@ -498,16 +519,24 @@ fdyn=function(mf, sto, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen
   e=environment(fsp)
   e$sdqw=sdfl # store sd
   # metab restored from S*f
-  qwde=qwf%*%t(sto) # dm/dt estimated from fluxes
+  qwde=qwf%*%t(stofull) # dm/dt estimated from fluxes
+  const=setNames(double(nmetfull), colnames(qwde))
   if (ils) {
-    const=mst
+    const[names(mst)]=mst
+    #browser()
   } else {
-    const=setNames(double(nmet), colnames(qwde))
     const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
   }
   isp=bspline::ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
+  pari=bspline::bsppar(isp)
+  if (length(ina) && any({imin <- apply(pari$qw[,ina, drop=FALSE], 2, min); ineg <- imin < 0.})) {
+    e=environment(isp)
+    #browser()
+    ineg=names(ineg[ineg])
+    e$qw[,ineg]=arrApply::arrApply(e$qw[,ineg,drop=FALSE], 2, "addv", v=-imin[ineg])
+  }
   # residuals dm/dt-sto*f
-  rsp=bspline::par2bsp(nsp-1L, qwd0-qwde, pard$xk)
+  rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
   res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, sdfl=sdfl)
   # atom balance
   if (length(atomlen)) {
