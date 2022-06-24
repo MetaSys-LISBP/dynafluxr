@@ -6,35 +6,30 @@
 \usage{
 fdyn(
   mf,
-  sto,
+  stofull,
   nsp = 4L,
   nki = 5L,
   lieq = NULL,
   monotone = 0,
   ils = FALSE,
-  lablen = NULL,
+  atomlen = NULL,
   npp = 10L
 )
 }
 \arguments{
-\item{mf}{Data-frame or matrix, metabolite kinetic measurements.
-Columns must be named with metabolite names and 'Time'.}
+\item{mf}{Data-frame or matrix, specie kinetic measurements.
+Columns must be named with specie names and 'Time'.}
 
-\item{sto}{Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
-metabolite 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
-the metabolite 'i' is consumed. Columns must be named with flux names.
-Rows must be names with metabolite names.}
-
-\item{nsp}{Integer, polynomial order of B-spline to use for metabolites
+\item{nsp}{Integer, polynomial order of B-spline to use for species
 (default 4)}
 
 \item{nki}{Integer, number of internal knots for B-splines
 (default 5)}
 
-\item{lieq}{List, equality constraints on metabolites
+\item{lieq}{List, equality constraints on species
 (default NULL, i.e. no equality constraint)}
 
-\item{monotone}{Numeric scalar or vector, 1=metabolites are
+\item{monotone}{Numeric scalar or vector, 1=species are
 monotonically increasing;
 -1=monotonically decreasing; 0=no constraint. If vector, each value
 constraints (or not) a corresponding data column in mf ('Time'
@@ -46,26 +41,31 @@ from counting)
 should be resolved instead of differential least squares.
 (default FALSE, i.e. dLS will be used)}
 
-\item{lablen}{Numerical named vector, indicates what is label length
-of a given compound used a vector item name. If provided, results
+\item{atomlen}{Numerical named vector, indicates what is label length
+of a given specie used a vector item name. If provided, results
 will contain \code{lsp} and \code{ilsp} fields which
-are a B-spline function representing label balance over msp and isp splines.
-(default NULL, i.e. no label balance will be provided)}
+are a B-spline function representing atom balance over msp and isp splines.
+(default NULL, i.e. no atom balance will be provided)}
+
+\item{sto}{Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
+specie 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
+the specie 'i' is consumed. Columns must be named with flux names.
+Rows must be names with specie names.}
 }
 \value{
 List with following components:
 \describe{
-  \item{mf:}{ metabolite data frame used for fitting}
+  \item{mf:}{ specie data frame used for fitting}
   \item{tp:}{ vector of time points for used measurements}
   \item{tpp:}{ vector of time points for plot (fine time resolution)}
   \item{sto:}{ stoichiometric matrix used for fitting}
   \item{invsto:}{ pseudo-inverse of stoichiometric matrix}
-  \item{msp:}{ measured metabolite spline function}
-  \item{isp:}{ integrated metabolite spline function}
-  \item{lsp:}{ label balance over msp spline function}
-  \item{ilsp:}{ label balance over isp spline function}
+  \item{msp:}{ measured specie spline function}
+  \item{isp:}{ integrated specie spline function}
+  \item{asp:}{ atom balance over msp spline function}
+  \item{iasp:}{ atom balance over isp spline function}
   \item{fsp:}{ flux spline function}
-  \item{dsp:}{ measured metabolite first derivative spline function}
+  \item{dsp:}{ measured specie first derivative spline function}
   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
   \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
 }
@@ -74,10 +74,10 @@ List with following components:
 Retrieve flux dynamics from metabolic kinetics
 }
 \details{
-Each item in \code{lieq} corresponds to a metabolite and is a
+Each item in \code{lieq} corresponds to a specie and is a
   2 column matrix (Time, Value). Each
   row of this matrix indicates what 'Value' must take corresponding
-  metabolite at what 'Time'. Typically, it can be used to impose
-  starting values at Time=0 for some metabolites.\cr
-  All metabolite fits are constraint to have values >= 0.
+  specie at what 'Time'. Typically, it can be used to impose
+  starting values at Time=0 for some species.\cr
+  All specie fits are constraint to have values >= 0.
 }

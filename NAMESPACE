@@ -2,6 +2,7 @@
 
 export(cli)
 export(fdyn)
+importFrom(arrApply,arrApply)
 importFrom(bspline,bsppar)
 importFrom(bspline,dbsp)
 importFrom(bspline,fitsmbsp)
@@ -9,3 +10,5 @@ importFrom(bspline,ibsp)
 importFrom(bspline,par2bsp)
 importFrom(grDevices,cairo_pdf)
 importFrom(qpdf,pdf_combine)
+importFrom(slam,matprod_simple_triplet_matrix)
+importFrom(slam,simple_triplet_zero_matrix)

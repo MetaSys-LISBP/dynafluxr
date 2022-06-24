@@ -23,10 +23,10 @@
 #'   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6)
 #'   # plot rates
 #'   dev.new()
-#'   matplot(tpp, res$fsp(tpp), type="l")
+#'   matplot(tpp, res$vsp(tpp), type="l")
 #'   ref=t(read.table(file.path(ddir, "glyco_teusink.flux.tsv"), sep="\t", header=TRUE, row.names=1, check.names=FALSE))
 #'   tf=as.numeric(rownames(ref)) # reference rate time points
-#'   nm_rate=colnames(bsppar(res$fsp)$qw)
+#'   nm_rate=colnames(bsppar(res$vsp)$qw)
 #'   itf=(tf >= min(tp) & tf <= max(tp))
 #'   matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch="o", cex=0.5)
 #'   legend("topright", legend=nm_rate, lty=1:5, col=1:6)
@@ -198,7 +198,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     dir.create(rd)
   #bnm=tools::file_path_sans_ext(opt$meas)
   #pm=bspline::bsppar(res$msp) # metab params
-  #pf=bspline::bsppar(res$fsp) # flux params
+  #pf=bspline::bsppar(res$vsp) # flux params
   #pr=bspline::bsppar(res$rsp) # resid params
   #pi=bspline::bsppar(res$isp) # resid params
   tp=res$tp
@@ -209,7 +209,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   # define plot function
   plotsp=function(fname, sp, main, ylab, data=NULL, savevar=NULL) {
     # plot splines with sd-band and data
-    if (!is.null(fname))
+    open_here=!is.null(fname)
+    if (open_here)
       pdf(fname)
     p=bspline::bsppar(sp)
     mc=sp(tpp) # specie smooth curves
@@ -249,7 +250,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       if (!is.null(p$sdqw))
         polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
     }
-    dev.off()
+    if (open_here)
+      dev.off()
     if (!is.null(savevar))
       assign(savevar, mc, envir=parent.frame())
   }
@@ -272,7 +274,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   # pdf with rates
   #browser()
-  plotsp(file.path(rd, "rates.pdf"), res$fsp, "Reaction rates", "Rate", NULL, "fc")
+  plotsp(file.path(rd, "rate.pdf"), res$vsp, "Reaction rates", "Rate 1/[Time]", NULL, "vc")
+  # pdf with fluxes (S*v)
+  plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL, "fc")
   # pdf with restored (integrated) metabs
   grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
   inames=colnames(bspline::bsppar(res$isp)$qw)
@@ -280,16 +284,18 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   colnames(tmp)=inames
   cnm=intersect(inames, colnames(mf)[-1L]) # NA columns in mf are absent in mc
   tmp[,cnm]=as.matrix(mf[,cnm])
-  plotsp(NULL, res$isp, "Estimated concentrations", "\u222bS\u00b7f dt", tmp, "ic")
+  plotsp(NULL, res$isp, "Estimated concentrations", "\u222bS\u00b7v dt", tmp, "ic")
+  dev.off()
   li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
   qpdf::pdf_combine(input=li, output=file.path(rd, "ispecie.pdf"))
   unlink(li)
   # pdf with residuals
-  plotsp(file.path(rd, "resid.pdf"), res$rsp, "Residuals", "dm/dt - S\u00b7f", NULL, "rc")
+  plotsp(file.path(rd, "resid.pdf"), res$rsp, "Residuals", "dm/dt - S\u00b7v", NULL, "rc")
   # tsv
   write.table(cbind(Time=tpp, mc), file=file.path(rd, "specie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
   write.table(cbind(Time=tpp, ic), file=file.path(rd, "ispecie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
-  write.table(cbind(Time=tpp, fc), file=file.path(rd, "rate.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(cbind(Time=tpp, vc), file=file.path(rd, "rate.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+  write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
   # .RData
   save(res, file=file.path(rd, "env.RData"))
   # Readme.md
@@ -300,13 +306,15 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
     "", "##File contents", "",
     " - `specie.pdf`: concentration plots (fitted by B-spline);",
-    " - `ispecie.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7f*);",
+    " - `ispecie.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7v*);",
     atomline,
     " - `rate.pdf`: estimated rate plots (by solving least squares);",
-    " - `resid.pdf`: residuals *dm/dt - S\u00b7f* plots;",
+    " - `flux.pdf`: estimated total fluxes (S*v) plots (by solving least squares);",
+    " - `resid.pdf`: residuals *dm/dt - S\u00b7v* plots;",
     " - `specie.tsv`: concentration table;",
     " - `ispeci.tsv`: estimated concentration table;",
-    " - `rate.tsv`: flux table;",
+    " - `rate.tsv`: rate table;",
+    " - `flux.tsv`: flux table;",
     " - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('env.RData', envir=e)` and then accessed as e.g. `ls(e$res)`;",
     " - `Readme.md`: this file;"
   )
@@ -362,16 +370,20 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{sto:}{ stoichiometric matrix used for fitting}
 #'   \item{invsto:}{ pseudo-inverse of stoichiometric matrix}
 #'   \item{msp:}{ measured specie spline function}
+#'   \item{vsp:}{ estimated rates spline function}
+#'   \item{fsp:}{ estimated total flux (S*v) spline function}
+#'   \item{dsp:}{ first derivative of measured spline function}
 #'   \item{isp:}{ integrated specie spline function}
 #'   \item{asp:}{ atom balance over msp spline function}
 #'   \item{iasp:}{ atom balance over isp spline function}
-#'   \item{fsp:}{ flux spline function}
+#'   \item{vsp:}{ flux spline function}
 #'   \item{dsp:}{ measured specie first derivative spline function}
 #'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
 #'   \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
+#' @importFrom arrApply arrApply
 #' @export
 fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen=NULL, npp=10L) {
 
@@ -407,7 +419,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   dsp=bspline::dbsp(msp)
   pard=bspline::bsppar(dsp)
   qwd=pard$qw
-  nwf=nrow(pard$qw)
+  nwv=nrow(pard$qw)
   # complete derivatives by 0 for non measured metabs
   qwd0=matrix(0., nrow(qwd), nmet)
   colnames(qwd0)=rownames(sto)
@@ -420,14 +432,14 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     qwm0=matrix(0., nrow=nwm, ncol=nmet)
     colnames(qwm0)=rownames(sto)
     qwm0[,colnames(parm$qw)]=parm$qw
-    # unknowns: qwf and mstart
+    # unknowns: qwv and mstart
     mstart=setNames(double(nmet), colnames(qwm0))
     mstart[colnames(parm$qw)]=parm$qw[1,] # starting values where known
     # integration matrix (cumsum(...))
     ima=diag(nrow=nwm-1)
     ima=(row(ima)>=col(ima))+0.
     ima=rbind(0., arrApply::arrApply(ima, 2, "multv", v=diff(pard$xk, lag=nsp)/nsp))
-    # f2m: ima%*%qwf%*%t(sto)+rep(1,nkmet)%o%mstart
+    # f2m: ima%*%qwv%*%t(sto)+rep(1,nkmet)%o%mstart
     jqw=aperm(ima%o%t(sto), c(1L,4L,2L,3L))
     dim(jqw)=c(prod(dim(jqw)[1L:2L]), prod(dim(jqw)[3L:4L]))
     jadd=rep(1., nrow(ima))%o%diag(nrow=nmet)
@@ -441,11 +453,11 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
         mono=monotone[rownames(sto)]
       }
       i=names(which(mono > 0))
-      umono=aperm(diag(nrow=nwf)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
-      dim(umono)=c(nwf*length(i), nwf*nflux)
+      umono=aperm(diag(nrow=nwv)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
+      dim(umono)=c(nwv*length(i), nwv*nflux)
       i=names(which(mono < 0))
-      tmp=aperm(diag(nrow=nwf)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
-      dim(tmp)=c(nwf*length(i), nwf*nflux)
+      tmp=aperm(diag(nrow=nwv)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
+      dim(tmp)=c(nwv*length(i), nwv*nflux)
       umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
       cmono=double(nrow(umono))
     } else {
@@ -457,13 +469,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     co=double(nrow(u))
     # solve iLS
     st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
-    # extract mst and qwf
+    # extract mst and qwv
     icnst=seq_len(nmet)
     mst=p[icnst]
     names(mst)=rownames(sto)
-    qwf=p[-icnst]
-    dim(qwf)=c(nwf, nflux)
-    colnames(qwf)=colnames(sto)
+    qwv=p[-icnst]
+    dim(qwv)=c(nwv, nflux)
+    colnames(qwv)=colnames(sto)
     # find sd
     ## cov of rhs
     covm0=slam::simple_triplet_zero_matrix(prod(dim(qwm0)))
@@ -478,10 +490,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     s=base::svd(jtot) # it is supposed to be full rank, otherwise lsi() would stop already
     jinv=tcrossprod(arrApply::arrApply(s$v, 2, "multv", v=1./s$d), s$u) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
-    # extract sd of mst and qwf
+    # extract sd of mst and qwv
     sdmst=sdp[icnst]
     sdfl=sdp[-icnst]
-    dim(sdfl)=c(nwf, nflux)
+    dim(sdfl)=c(nwv, nflux)
     colnames(sdfl)=colnames(sto)
   } else {
     # differential LS
@@ -494,7 +506,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     stoinv=s$v%*%(d*t(s$u))
     dimnames(stoinv)=rev(dimnames(sto))
     # solve dLS
-    qwf=qwd0%*%t(stoinv)
+    qwv=qwd0%*%t(stoinv)
     })
     # find sd
     ## estimate cov of qwd
@@ -514,12 +526,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     }
   }
   #print(st)
-  # flux splines
-  fsp=bspline::par2bsp(nsp-1L, qwf, pard$xk)
-  e=environment(fsp)
+  # rate splines
+  vsp=bspline::par2bsp(nsp-1L, qwv, pard$xk)
+  e=environment(vsp)
   e$sdqw=sdfl # store sd
-  # metab restored from S*f
-  qwde=qwf%*%t(stofull) # dm/dt estimated from fluxes
+  # metab restored from S*v
+  qwde=qwv%*%t(stofull) # dm/dt estimated from rates
+  fsp=bspline::par2bsp(nsp-1L, qwde, pard$xk)
   const=setNames(double(nmetfull), colnames(qwde))
   if (ils) {
     const[names(mst)]=mst
@@ -527,7 +540,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   } else {
     const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
   }
-  isp=bspline::ibsp(bspline::par2bsp(nsp-1L, qwde, pard$xk), const=const)
+  isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
   if (length(ina) && any({imin <- apply(pari$qw[,ina, drop=FALSE], 2, min); ineg <- imin < 0.})) {
     e=environment(isp)
@@ -537,7 +550,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   }
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (ils) NULL else stoinv, msp=msp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, sdfl=sdfl)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (ils) NULL else stoinv, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, sdfl=sdfl)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)
@@ -545,6 +558,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     iasp=bspline::par2bsp(nsp, colSums(t(pari$qw)*atomlen[colnames(pari$qw)]), pari$xk)
     res$asp=asp
     res$iasp=iasp
+    res$atomlen=atomlen
   }
   res
 }

@@ -29,19 +29,19 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   tp=res$tp
   np=length(tp)
   tpp=res$tpp
-  # plot metabolites
+  # plot species
   matplot(tpp, res$msp(tpp), type="l")
   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6)
-  # plot fluxes
+  # plot rates
   dev.new()
   matplot(tpp, res$fsp(tpp), type="l")
   ref=t(read.table(file.path(ddir, "glyco_teusink.flux.tsv"), sep="\t", header=TRUE, row.names=1, check.names=FALSE))
-  tf=as.numeric(rownames(ref)) # reference flux time points
-  nm_flux=colnames(bsppar(res$fsp)$qw)
+  tf=as.numeric(rownames(ref)) # reference rate time points
+  nm_rate=colnames(bsppar(res$fsp)$qw)
   itf=(tf >= min(tp) & tf <= max(tp))
-  matpoints(tf[itf], ref[itf, nm_flux, drop=FALSE], pch="o", cex=0.5)
-  legend("topright", legend=nm_flux, lty=1:5, col=1:6)
+  matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch="o", cex=0.5)
+  legend("topright", legend=nm_rate, lty=1:5, col=1:6)
   # plot residuals
   dev.new()
   matplot(tpp, res$rsp(tpp), type="l")
