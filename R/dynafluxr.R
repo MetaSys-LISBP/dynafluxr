@@ -10,38 +10,40 @@
 #'   # $ Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt
 #'
 #'   # from R session
-#'   ddir=system.file("data", package="dynafluxr")
+#'   ddir=system.file("dataglyco", package="dynafluxr")
 #'   meas=file.path(ddir, "data_teusink.tsv")
 #'   sto=file.path(ddir, "network_teusink.txt")
-#'   res=cli(c("-m", meas, "-s", sto, "--skip", "10"))
+#'   res=cli(c("-m", meas, "-s", sto, "--skip", "10", "-o", ""))
 #'   tp=res$tp
 #'   np=length(tp)
 #'   tpp=res$tpp
 #'   # plot species
 #'   matplot(tpp, res$msp(tpp), type="l")
 #'   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
-#'   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6)
+#'   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6, cex=0.75)
 #'   # plot rates
 #'   dev.new()
 #'   matplot(tpp, res$vsp(tpp), type="l")
-#'   ref=t(read.table(file.path(ddir, "glyco_teusink.flux.tsv"), sep="\t", header=TRUE, row.names=1, check.names=FALSE))
+#'   ref=t(read.delim(file.path(ddir, "glyco_teusink.flux.tsv"), row.names=1, check.names=FALSE))
 #'   tf=as.numeric(rownames(ref)) # reference rate time points
 #'   nm_rate=colnames(bsppar(res$vsp)$qw)
 #'   itf=(tf >= min(tp) & tf <= max(tp))
 #'   matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch="o", cex=0.5)
-#'   legend("topright", legend=nm_rate, lty=1:5, col=1:6)
+#'   legend("topright", legend=nm_rate, lty=1:5, col=1:6, cex=0.75)
 #'   # plot residuals
 #'   dev.new()
-#'   matplot(tpp, res$rsp(tpp), type="l")
-#'   legend("topright", legend=colnames(bsppar(res$rsp)$qw), lty=1:5, col=1:6)
+#'   matplot(tpp, res$risp(tpp), type="l")
+#'   legend("topright", legend=colnames(bsppar(res$rsp)$qw), lty=1:5, col=1:6, cex=0.75)
 #' @importFrom qpdf pdf_combine
 #' @importFrom bspline bsppar
-#' @importFrom grDevices cairo_pdf
+#' @importFrom grDevices cairo_pdf rgb col2rgb pdf dev.off
+#' @importFrom optparse make_option OptionParser parse_args print_help
+#' @importFrom utils read.delim write.table zip
+#' @importFrom stats setNames
+#' @importFrom graphics legend matlines matpoints polygon points lines 
 #' @export
 cli=function(args=commandArgs(trailingOnly=TRUE)) {
-  #stopifnot(requireNamespace("optparse", quite=TRUE))
-  library(optparse)
-  
+  Specie <- Time <- Value <- NULL # to keep 'R CMD check' calm about subset() arguments
   olist=list(
     make_option(c("-m", "--meas"), type="character",
       help="Measurement file in TSV (tab separated value) format,
@@ -81,6 +83,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       "B-splines polynomial order for specie kinetics. The rate dynamics will have
   order 'norder-1' [default %default]"
     ),
+    make_option(c("--lna"), type="character", default="",
+      help="List of coma separated NA species, e.g. '--lna=FBP,F6P'. If a specie is present both in MEAS file and in LNA list, it is overwritten with NAs"
+    ),
     make_option(c("-c", "--constr"), type="character",
       help="Constraint file in TSV format, 3 column table: Time, Specie, Value.
   Specie names should be the same as in stoichiometric model."
@@ -96,19 +101,27 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   Specie names should be the same as in stoichiometric model. 'Value'
   can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing).
   For example, substrates that are only consumed could get more
-  realistic fit if corresponding 'Value' is set to -1."
+  realistic fit if corresponding 'Value' is set to -1. Cf. also options --increasing and --decreasing."
+    ),
+    make_option(c("--increasing"), type="character", default="",
+      help="List of coma separated species that are supposed to be monotonously increasing, e.g. '--increasing=LAC,ETOH'. If a specie is present both in file MONO and in this option,
+  this option takes the precedence."
+    ),
+    make_option(c("--decreasing"), type="character", default="",
+      help="List of coma separated species that are supposed to be monotonously decreasing, e.g. '--decreasing=GLC'. If a specie is present both in file MONO and in this option,
+  this option takes the precedence."
     ),
     make_option(c("-o", "--out"), type="character",
-      help="Directory (or zip) name to use for result files. By default, measurement name without extension is used."
+      help="Directory (or zip) name to use for result files. By default, measurement name without extension is used. If empty, no results are written to disk (can be useful for programmatic use)."
     ),
     make_option(c("--skip"), type="integer", default=0L,
       help="Number of first time points that should be skipped in specie measurements"
     ),
     make_option(c("-z", "--zip"), action="store_true", default=FALSE,
-      help="Create zip archive with results."
+      help="Create zip archive with results (default: FALSE)."
     ),
-    make_option(c("--ils"), action="store_true", default=FALSE,
-      help="ils Least Squares formulation"
+    make_option(c("--dls"), action="store_true", default=FALSE,
+      help="use Differential Least Squares formulation (default: FALSE)"
     ),
     make_option(c("--npp"), type="integer", default=10, help=
       "Number of sub-intervals in each time interval for smooth curve plotting
@@ -134,7 +147,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       q("no", status=1)
     } else {
       #options(show.error.messages = FALSE)
-      stop("\r", call.=FALSE)
+      #stop("\r", call.=FALSE)
+      return(invisible(NULL))
     }
   }
   # mandatory arguments
@@ -154,6 +168,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     stop(sprintf("Column name staring with 'Time' is not found or there are many in '%s'", opt$meas))
   #print(c("mf=", colnames(mf)))
   #print(c("sto=", rownames(sto)))
+  # put Time in first column
   mf=cbind(Time=mf[,iti], mf[, intersect(colnames(mf)[-iti], rownames(sto))])
   if (ncol(mf) == 1L)
     stop(sprintf("No valid specie names in '%s'", opt$meas))
@@ -168,13 +183,13 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     lieq=NULL
   }
   # read monotonicity constraints
+  mono=setNames(double(nrow(sto)), rownames(sto))
   if (!is.null(opt$mono)) {
     dfmo=read.delim(opt$mono, comment.char="#")
-    mono=setNames(double(nrow(sto)), rownames(sto))
     mono[dfmo[,1L]]=dfmo[,2L]
-  } else {
-    mono=0
   }
+  mono[strsplit(opt$increasing, ",")[[1L]]]=1
+  mono[strsplit(opt$decreasing, ",")[[1L]]]=-1
   # read atom lengths
   if (!is.null(opt$atom)) {
     datom=read.delim(opt$atom, comment.char="#")
@@ -183,8 +198,13 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   } else {
     atomlen=NULL
   }
+  # prepare NA list form --lna
+  lna=strsplit(opt$lna, ",")[[1L]]
+  if (length(lna) > 0L) {
+    mf[,lna]=rep(NA, nrow(mf))
+  }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, ils=opt$ils, atomlen=atomlen, npp=opt$npp)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npp=opt$npp)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -194,134 +214,130 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   } else {
     rd=opt$out
   }
-  if (!dir.exists(rd))
-    dir.create(rd)
-  #bnm=tools::file_path_sans_ext(opt$meas)
-  #pm=bspline::bsppar(res$msp) # metab params
-  #pf=bspline::bsppar(res$vsp) # flux params
-  #pr=bspline::bsppar(res$rsp) # resid params
-  #pi=bspline::bsppar(res$isp) # resid params
-  tp=res$tp
-  tpp=res$tpp
-  ratp=range(tp, na.rm=TRUE)
-  tppr=c(tpp, rev(tpp)) # for SD band plotting
-  bcol=do.call(rgb, as.list(c(col2rgb(1)/255, 0.3))) # band color
-  # define plot function
-  plotsp=function(fname, sp, main, ylab, data=NULL, savevar=NULL) {
-    # plot splines with sd-band and data
-    open_here=!is.null(fname)
-    if (open_here)
-      pdf(fname)
-    p=bspline::bsppar(sp)
-    mc=sp(tpp) # specie smooth curves
-    ylim=range(mc, data, na.rm=TRUE)
-    if (!is.null(p$sdqw)) {
-      msdp=sp(tpp, fsd=opt$fsd)
-      msdm=sp(tpp, fsd=-opt$fsd)
-      ylim=range(ylim, msdp, msdm)
-    }
-    plot(1, xlim=ratp, main=main, ylim=ylim, xlab="Time", ylab=ylab, t="n")
-    matlines(tpp, mc)
-    if (!is.null(data))
-      matpoints(tp, data, pch="o", cex=0.5)
-    legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6, bg=rgb(1,1,1,0.3))
-    # multi-color sd-bands
-    if (!is.null(p$sdqw)) {
-      for (im in seq_along(colnames(p$qw))) {
-        m=colnames(p$qw)[im]
-        #cat("m=", m, "\n")
-        polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=do.call(rgb, as.list(c(col2rgb((im-1)%%6+1)/255, 0.3))))
+  if (nchar(rd)) {
+    if (!dir.exists(rd))
+      dir.create(rd)
+    tp=res$tp
+    tpp=res$tpp
+    ratp=range(tp, na.rm=TRUE)
+    tppr=c(tpp, rev(tpp)) # for SD band plotting
+    bcol=do.call(rgb, as.list(c(col2rgb(1)/255, 0.3))) # band color
+    # define plot function
+    plotsp=function(fname, sp, main, ylab, data=NULL) {
+      # plot splines with sd-band and data
+      open_here=!is.null(fname)
+      if (open_here)
+        pdf(fname)
+      p=bspline::bsppar(sp)
+      mc=sp(tpp) # specie smooth curves
+      ylim=range(mc, data, na.rm=TRUE)
+      if (!is.null(p$sdqw)) {
+        msdp=sp(tpp, fsd=opt$fsd)
+        msdm=sp(tpp, fsd=-opt$fsd)
+        ylim=range(ylim, msdp, msdm)
       }
-    }
-    # individual data + sd-bands
-    for (m in colnames(p$qw)) {
-      if (!(is.null(data) || !(m %in% colnames(data)) || all(is.na(data[,m])))) {
-        d=data[,m]
-      } else {
-        d=NULL
+      plot(1, xlim=ratp, main=main, ylim=ylim, xlab="Time", ylab=ylab, t="n")
+      matlines(tpp, mc)
+      if (!is.null(data))
+        matpoints(tp, data, pch="o", cex=0.5)
+      legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6, bg=rgb(1,1,1,0.3), cex=0.75)
+      # multi-color sd-bands
+      if (!is.null(p$sdqw)) {
+        for (im in seq_along(colnames(p$qw))) {
+          m=colnames(p$qw)[im]
+          #cat("m=", m, "\n")
+          polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=do.call(rgb, as.list(c(col2rgb((im-1)%%6+1)/255, 0.3))))
+        }
       }
-      ylim=range(d, mc[,m], na.rm=TRUE)
-      if (!is.null(p$sdqw))
-        ylim=range(ylim, msdp[,m], msdm[,m])
-      plot(1, main=m, xlab="Time", ylab=ylab, xlim=ratp, ylim=ylim, type="n")
-      if (!is.null(d))
-        points(tp, d, pch="o", cex=0.5)
-      lines(tpp, mc[,m])
-      if (!is.null(p$sdqw))
-        polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
+      # individual data + sd-bands
+      for (m in colnames(p$qw)) {
+        if (!(is.null(data) || !(m %in% colnames(data)) || all(is.na(data[,m])))) {
+          d=data[,m]
+        } else {
+          d=NULL
+        }
+        ylim=range(d, mc[,m], na.rm=TRUE)
+        if (!is.null(p$sdqw))
+          ylim=range(ylim, msdp[,m], msdm[,m])
+        plot(1, main=m, xlab="Time", ylab=ylab, xlim=ratp, ylim=ylim, type="n")
+        if (!is.null(d))
+          points(tp, d, pch="o", cex=0.5)
+        lines(tpp, mc[,m])
+        if (!is.null(p$sdqw))
+          polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
+      }
+      if (open_here)
+        dev.off()
+      return(invisible(mc))
     }
-    if (open_here)
+    # pdf with species
+    mc=plotsp(file.path(rd, "specie.pdf"), res$msp, "Measured concentrations fitted by B-splines", "Concentration", res$mf[,-1L])
+    # pdf with atom balance
+    if (length(atomlen) > 0L) {
+      pdf(file.path(rd, "atom.pdf"))
+      datom=colSums(t(mf[,-1L])*atomlen[colnames(mf)[-1L]], na.rm=TRUE)
+      ac=res$asp(tpp)
+      iac=res$iasp(tpp)
+      plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE), xlab="Time", ylab="Total atom number", t="n")
+      matlines(tpp, cbind(ac, iac))
+      points(tp, datom, pch="o", cex=0.5)
+      legend("topright", legend=c("fitted species", "integrated species"), bg=rgb(1,1,1,0.3), lty=1:2, col=1:2, cex=0.75)
       dev.off()
-    if (!is.null(savevar))
-      assign(savevar, mc, envir=parent.frame())
-  }
-  # pdf with species
-  plotsp(file.path(rd, "specie.pdf"), res$msp, "Measured concentrations fitted by B-splines", "Concentration", res$mf[,-1L], "mc")
-  # pdf with atom balance
-  if (length(atomlen) > 0L) {
-    pdf(file.path(rd, "atom.pdf"))
-    datom=colSums(t(mf[,-1L])*atomlen[colnames(mf)[-1L]], na.rm=TRUE)
-    ac=res$asp(tpp)
-    iac=res$iasp(tpp)
-    plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE), xlab="Time", ylab="Total atom number", t="n")
-    matlines(tpp, cbind(ac, iac))
-    points(tp, datom, pch="o", cex=0.5)
-    legend("topright", legend=c("fitted species", "integrated species"), bg=rgb(1,1,1,0.3), lty=1:2, col=1:2)
+      atomline=" - `atom.pdf`: atom balance plots;"
+    } else {
+      atomline=NULL
+    }
+    # pdf with rates
+    #browser()
+    vc=plotsp(file.path(rd, "rate.pdf"), res$vsp, "Reaction rates", "Rate 1/[Time]", NULL)
+    # pdf with fluxes (S*v)
+    fc=plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL)
+    # pdf with restored (integrated) metabs
+    grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
+    inames=colnames(bspline::bsppar(res$isp)$qw)
+    tmp=matrix(NA_real_, nrow(mf), length(inames)) # inject here mf values
+    colnames(tmp)=inames
+    cnm=intersect(inames, colnames(mf)[-1L]) # NA columns in mf are absent in mc
+    tmp[,cnm]=as.matrix(mf[,cnm])
+    ic=plotsp(NULL, res$isp, "Estimated concentrations", "\u222bS\u00b7v dt", tmp)
     dev.off()
-    atomline=" - `atom.pdf`: atom balance plots;"
-  } else {
-    atomline=NULL
-  }
-  # pdf with rates
-  #browser()
-  plotsp(file.path(rd, "rate.pdf"), res$vsp, "Reaction rates", "Rate 1/[Time]", NULL, "vc")
-  # pdf with fluxes (S*v)
-  plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL, "fc")
-  # pdf with restored (integrated) metabs
-  grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
-  inames=colnames(bspline::bsppar(res$isp)$qw)
-  tmp=matrix(NA_real_, nrow(mf), length(inames)) # inject here mf values
-  colnames(tmp)=inames
-  cnm=intersect(inames, colnames(mf)[-1L]) # NA columns in mf are absent in mc
-  tmp[,cnm]=as.matrix(mf[,cnm])
-  plotsp(NULL, res$isp, "Estimated concentrations", "\u222bS\u00b7v dt", tmp, "ic")
-  dev.off()
-  li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
-  qpdf::pdf_combine(input=li, output=file.path(rd, "ispecie.pdf"))
-  unlink(li)
-  # pdf with residuals
-  plotsp(file.path(rd, "resid.pdf"), res$rsp, "Residuals", "dm/dt - S\u00b7v", NULL, "rc")
-  # tsv
-  write.table(cbind(Time=tpp, mc), file=file.path(rd, "specie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
-  write.table(cbind(Time=tpp, ic), file=file.path(rd, "ispecie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
-  write.table(cbind(Time=tpp, vc), file=file.path(rd, "rate.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
-  write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
-  # .RData
-  save(res, file=file.path(rd, "env.RData"))
-  # Readme.md
-  cat(file=file.path(rd, "Readme.md"), sep="\n",
-    "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
-    paste0("This is the result files produced by dynafluxr R package on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
-    "The command to reproduce these results is:", "",
-    paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
-    "", "##File contents", "",
-    " - `specie.pdf`: concentration plots (fitted by B-spline);",
-    " - `ispecie.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7v*);",
-    atomline,
-    " - `rate.pdf`: estimated rate plots (by solving least squares);",
-    " - `flux.pdf`: estimated total fluxes (S*v) plots (by solving least squares);",
-    " - `resid.pdf`: residuals *dm/dt - S\u00b7v* plots;",
-    " - `specie.tsv`: concentration table;",
-    " - `ispeci.tsv`: estimated concentration table;",
-    " - `rate.tsv`: rate table;",
-    " - `flux.tsv`: flux table;",
-    " - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('env.RData', envir=e)` and then accessed as e.g. `ls(e$res)`;",
-    " - `Readme.md`: this file;"
-  )
-  # zip files
-  if (opt$zip) {
-    zip(paste0(rd, ".zip"), rd, extra="-j")
-    unlink(rd, recursive=TRUE)
+    li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
+    qpdf::pdf_combine(input=li, output=file.path(rd, "ispecie.pdf"))
+    unlink(li)
+    # pdf with residuals
+    rc=plotsp(file.path(rd, "resid.pdf"), res$rsp, "Residuals", "dm/dt - S\u00b7v", NULL)
+    # tsv
+    write.table(cbind(Time=tpp, mc), file=file.path(rd, "specie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+    write.table(cbind(Time=tpp, ic), file=file.path(rd, "ispecie.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+    write.table(cbind(Time=tpp, vc), file=file.path(rd, "rate.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+    write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
+    # .RData
+    save(res, file=file.path(rd, "env.RData"))
+    # Readme.md
+    cat(file=file.path(rd, "Readme.md"), sep="\n",
+      "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
+      paste0("This is the result files produced by dynafluxr R package on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
+      "The command to reproduce these results is:", "",
+      paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
+      "", "##File contents", "",
+      " - `specie.pdf`: concentration plots (fitted by B-spline);",
+      " - `ispecie.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7v*);",
+      atomline,
+      " - `rate.pdf`: estimated rate plots (by solving least squares);",
+      " - `flux.pdf`: estimated total fluxes (S*v) plots (by solving least squares);",
+      " - `resid.pdf`: residuals *dm/dt - S\u00b7v* plots;",
+      " - `specie.tsv`: concentration table;",
+      " - `ispeci.tsv`: estimated concentration table;",
+      " - `rate.tsv`: rate table;",
+      " - `flux.tsv`: flux table;",
+      " - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('env.RData', envir=e)` and then accessed as e.g. `ls(e$res)`;",
+      " - `Readme.md`: this file;"
+    )
+    # zip files
+    if (opt$zip) {
+      zip(paste0(rd, ".zip"), rd, extras="-j")
+      unlink(rd, recursive=TRUE)
+    }
   }
   invisible(res)
 }
@@ -330,10 +346,11 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' 
 #' @param mf Data-frame or matrix, specie kinetic measurements.
 #'   Columns must be named with specie names and 'Time'.
-#' @param sto Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
-#'   specie 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
-#'   the specie 'i' is consumed. Columns must be named with flux names.
-#'   Rows must be names with specie names.
+#' @param stofull Full stoichiometric matrix, \code{stofull[i,j]} means reaction 'j' produces
+#'   specie 'i' with coeficient 'stofull[i,j]'. If \code{stofull[i,j] < 0},
+#'   the specie 'i' is consumed. Columns must be named with reaction names.
+#'   Rows must be names with the species. "Full" in the name means that matrix includes
+#'   even NA species.
 #' @param nsp Integer, polynomial order of B-spline to use for species
 #'   (default 4)
 #' @param nki Integer, number of internal knots for B-splines
@@ -347,14 +364,17 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   column is excluded
 #'   from counting)
 #'   (default 0, i.e. no monotonicity constraint)
-#' @param ils Logical scalar, if TRUE, indicates that integral least squares
-#'   should be resolved instead of differential least squares.
-#'   (default FALSE, i.e. dLS will be used)
+#' @param dls Logical scalar, if TRUE, indicates that differential least squares
+#'   should be resolved instead of integral least squares.
+#'   (default FALSE, i.e. ILS will be used)
 #' @param atomlen Numerical named vector, indicates what is label length
 #'   of a given specie used a vector item name. If provided, results
 #'   will contain \code{lsp} and \code{ilsp} fields which
 #'   are a B-spline function representing atom balance over msp and isp splines.
 #'   (default NULL, i.e. no atom balance will be provided)
+#' @param npp Integer scalar, indicates a number of subintervals to which
+#'   each time interval will be subdivided to produce smoother plots.
+#'   (default 10)
 #' @details
 #'   Each item in \code{lieq} corresponds to a specie and is a
 #'   2 column matrix (Time, Value). Each
@@ -368,7 +388,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{tp:}{ vector of time points for used measurements}
 #'   \item{tpp:}{ vector of time points for plot (fine time resolution)}
 #'   \item{sto:}{ stoichiometric matrix used for fitting}
-#'   \item{invsto:}{ pseudo-inverse of stoichiometric matrix}
+#'   \item{invsto:}{ pseudo-inverse of stoichiometric matrix used in DSL (NULL for ISL)}
 #'   \item{msp:}{ measured specie spline function}
 #'   \item{vsp:}{ estimated rates spline function}
 #'   \item{fsp:}{ estimated total flux (S*v) spline function}
@@ -378,14 +398,18 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{iasp:}{ atom balance over isp spline function}
 #'   \item{vsp:}{ flux spline function}
 #'   \item{dsp:}{ measured specie first derivative spline function}
-#'   \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
-#'   \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
+#'   \item{rsp:}{ residual \code{dM/dt - S\%*\%v} spline function}
+#'   \item{risp:}{ integral residual \code{M - \\u222bS\%*\%v dt} spline function}
+#'   \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
+#'   \item{chi2tab:}{ data-frame with chi2-test results}
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
 #' @importFrom arrApply arrApply
+#' @importFrom stats var pchisq
+#' @importFrom nlsic lsi
 #' @export
-fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, atomlen=NULL, npp=10L) {
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npp=10L) {
 
   tp=mf$Time
   dtp=diff(tp)
@@ -397,7 +421,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   } else {
     mono=monotone
   }
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=min(dtp[dtp != 0], na.rm=TRUE)/10., trace=1), estSD=TRUE)
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=min(dtp[dtp != 0], na.rm=TRUE)/10., trace=0), estSD=TRUE)
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
@@ -409,6 +433,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     e$qw=e$qw[,-ibad,drop=FALSE]
     e$sdy=e$sdy[-ibad]
     e$sdqw=e$sdqw[,-ibad,drop=FALSE]
+  } else {
+    sto=stofull
   }
   parm=bspline::bsppar(msp)
   nmet=nrow(sto)
@@ -426,7 +452,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   qwd0[,colnames(qwd)]=qwd
 
   # calculates weights for fluxes
-  if (ils) {
+  if (!dls) {
     # build integral LS
     # qwm0: metab coeffs including 0s, it will be rhs
     qwm0=matrix(0., nrow=nwm, ncol=nmet)
@@ -467,9 +493,9 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     # positivity constraint matrix u is the same as jtot
     u=rbind(jtot, umono)
     co=double(nrow(u))
-    # solve iLS
+    # solve ILS
     st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
-    # extract mst and qwv
+    # extract mst (metabolite starting values) and qwv
     icnst=seq_len(nmet)
     mst=p[icnst]
     names(mst)=rownames(sto)
@@ -506,7 +532,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
     stoinv=s$v%*%(d*t(s$u))
     dimnames(stoinv)=rev(dimnames(sto))
     # solve dLS
-    qwv=qwd0%*%t(stoinv)
+    qwv=tcrossprod(qwd0, stoinv)
     })
     # find sd
     ## estimate cov of qwd
@@ -534,7 +560,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   qwde=qwv%*%t(stofull) # dm/dt estimated from rates
   fsp=bspline::par2bsp(nsp-1L, qwde, pard$xk)
   const=setNames(double(nmetfull), colnames(qwde))
-  if (ils) {
+  if (!dls) {
     const[names(mst)]=mst
     #browser()
   } else {
@@ -542,7 +568,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   }
   isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
-  if (length(ina) && any({imin <- apply(pari$qw[,ina, drop=FALSE], 2, min); ineg <- imin < 0.})) {
+  if (dls && any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
     e=environment(isp)
     #browser()
     ineg=names(ineg[ineg])
@@ -550,7 +576,22 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, ils=FALSE, ato
   }
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (ils) NULL else stoinv, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, sdfl=sdfl)
+  # integrated residuals m-\int sto*f
+  qw0=matrix(0., nwm, nmetfull)
+  colnames(qw0)=colnames(pari$qw)
+  qw0[,colnames(parm$qw)]=parm$qw
+  risp=bspline::par2bsp(nsp, qw0-pari$qw, parm$xk)
+  #browser()
+  # chi2 test
+  # varm: variance of fitted metabs
+  varm=apply(mf[,-1L]-msp(mf$Time, colnames(mf)[-1L]), 2L, stats::var, na.rm=TRUE)
+  chi2=colSums(as.matrix(mf[,-1L]-isp(mf$Time, colnames(mf)[-1L]))**2, na.rm=TRUE)/varm
+  df=colSums(!is.na(mf[,-1L]))-(if(dls) nrow(qwv) else nwm)
+  pval=stats::pchisq(chi2, df=df, lower=FALSE)
+  chi2tab=data.frame(varm=varm, df=df, chi2=chi2, pval=pval)
+  #browser()
+  
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (dls) stoinv else NULL, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)

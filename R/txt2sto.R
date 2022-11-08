@@ -2,11 +2,11 @@
 #' 
 #' @param fn String, file name
 #' @return Matrix of size n_metab x n_reac
+#' @importFrom utils read.delim
 #' @export
+
 txt2sto=function(fn) {
-    #' parse txt with stoichiometric equations
-    #' return stoichiometric matrix
-    te=read.delim(fn, header=FALSE, row.names=1L, comment="#")
+    te=read.delim(fn, header=FALSE, row.names=1L, comment.char="#")
     sto=data.frame()
     for (re in row.names(te)) {
         #if (re == "vSUC")

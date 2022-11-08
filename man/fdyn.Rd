@@ -11,7 +11,7 @@ fdyn(
   nki = 5L,
   lieq = NULL,
   monotone = 0,
-  ils = FALSE,
+  dls = FALSE,
   atomlen = NULL,
   npp = 10L
 )
@@ -19,6 +19,12 @@ fdyn(
 \arguments{
 \item{mf}{Data-frame or matrix, specie kinetic measurements.
 Columns must be named with specie names and 'Time'.}
+
+\item{stofull}{Full stoichiometric matrix, \code{stofull[i,j]} means reaction 'j' produces
+specie 'i' with coeficient 'stofull[i,j]'. If \code{stofull[i,j] < 0},
+the specie 'i' is consumed. Columns must be named with reaction names.
+Rows must be names with the species. "Full" in the name means that matrix includes
+even NA species.}
 
 \item{nsp}{Integer, polynomial order of B-spline to use for species
 (default 4)}
@@ -37,9 +43,9 @@ column is excluded
 from counting)
 (default 0, i.e. no monotonicity constraint)}
 
-\item{ils}{Logical scalar, if TRUE, indicates that integral least squares
-should be resolved instead of differential least squares.
-(default FALSE, i.e. dLS will be used)}
+\item{dls}{Logical scalar, if TRUE, indicates that differential least squares
+should be resolved instead of integral least squares.
+(default FALSE, i.e. ILS will be used)}
 
 \item{atomlen}{Numerical named vector, indicates what is label length
 of a given specie used a vector item name. If provided, results
@@ -47,10 +53,9 @@ will contain \code{lsp} and \code{ilsp} fields which
 are a B-spline function representing atom balance over msp and isp splines.
 (default NULL, i.e. no atom balance will be provided)}
 
-\item{sto}{Stoichiometric matrix, \code{sto[i,j]} means reaction 'j' produces
-specie 'i' with the flux 'sto[i,j]'. If \code{sto[i,j] < 0},
-the specie 'i' is consumed. Columns must be named with flux names.
-Rows must be names with specie names.}
+\item{npp}{Integer scalar, indicates a number of subintervals to which
+each time interval will be subdivided to produce smoother plots.
+(default 10)}
 }
 \value{
 List with following components:
@@ -59,15 +64,20 @@ List with following components:
   \item{tp:}{ vector of time points for used measurements}
   \item{tpp:}{ vector of time points for plot (fine time resolution)}
   \item{sto:}{ stoichiometric matrix used for fitting}
-  \item{invsto:}{ pseudo-inverse of stoichiometric matrix}
+  \item{invsto:}{ pseudo-inverse of stoichiometric matrix used in DSL (NULL for ISL)}
   \item{msp:}{ measured specie spline function}
+  \item{vsp:}{ estimated rates spline function}
+  \item{fsp:}{ estimated total flux (S*v) spline function}
+  \item{dsp:}{ first derivative of measured spline function}
   \item{isp:}{ integrated specie spline function}
   \item{asp:}{ atom balance over msp spline function}
   \item{iasp:}{ atom balance over isp spline function}
-  \item{fsp:}{ flux spline function}
+  \item{vsp:}{ flux spline function}
   \item{dsp:}{ measured specie first derivative spline function}
-  \item{rsp:}{ residual \code{dm/dt - sto\%*\%flux} spline function}
-  \item{sdfl:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nflux})}
+  \item{rsp:}{ residual \code{dM/dt - S\%*\%v} spline function}
+  \item{risp:}{ integral residual \code{M - \\u222bS\%*\%v dt} spline function}
+  \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
+  \item{chi2tab:}{ data-frame with chi2-test results}
 }
 }
 \description{

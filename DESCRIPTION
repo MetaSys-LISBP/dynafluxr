@@ -1,10 +1,10 @@
 Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Concentration Kinetic Measurements
-Version: 0.11.0
+Version: 0.12
 Author: Serguei Sokol <sokol@insa-toulouse.fr>
 Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
-Description: Reaction rate dynamics can be retrieved from kinetic measurements
+Description: Reaction rate dynamics can be retrieved from time-series measurements
   of chemical species and/or their isotopes. User has to provide
   corresponding stoechiometric
   matrix but not a regulation model (Michaelis-Menten or similar).
@@ -17,6 +17,11 @@ Description: Reaction rate dynamics can be retrieved from kinetic measurements
   a stand alone application with command line interface.
 License: GPL-2
 Encoding: UTF-8
-Depends: bspline, optparse
-Import: arrApply, slam, grDevices, qpdf
-RoxygenNote: 7.1.1
+Depends: bspline, nlsic
+Imports: optparse, qpdf, arrApply, slam, grDevices
+RoxygenNote: 7.2.0
+Suggests: 
+    RUnit,
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
