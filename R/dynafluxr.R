@@ -223,7 +223,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     tppr=c(tpp, rev(tpp)) # for SD band plotting
     bcol=do.call(rgb, as.list(c(col2rgb(1)/255, 0.3))) # band color
     # define plot function
-    plotsp=function(fname, sp, main, ylab, data=NULL) {
+    plotsp=function(fname, sp, main, ylab, data=NULL, sto=NULL) {
       # plot splines with sd-band and data
       open_here=!is.null(fname)
       if (open_here)
@@ -250,13 +250,21 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
         }
       }
       # individual data + sd-bands
+      vct=t(res$vsp(tpp)) # transposed rate smooth curves
       for (m in colnames(p$qw)) {
         if (!(is.null(data) || !(m %in% colnames(data)) || all(is.na(data[,m])))) {
           d=data[,m]
         } else {
           d=NULL
         }
-        ylim=range(d, mc[,m], na.rm=TRUE)
+        if (!is.null(sto)) {
+          # prepare individual fluxes
+          nm_re=names(which(sto[m,] != 0))
+          fl=t(sto[m,nm_re]*vct[nm_re,,drop=FALSE])
+        } else {
+          fl=NULL
+        }
+        ylim=range(d, mc[,m], fl, na.rm=TRUE)
         if (!is.null(p$sdqw))
           ylim=range(ylim, msdp[,m], msdm[,m])
         plot(1, main=m, xlab="Time", ylab=ylab, xlim=ratp, ylim=ylim, type="n")
@@ -265,6 +273,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
         lines(tpp, mc[,m])
         if (!is.null(p$sdqw))
           polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
+        if (!is.null(sto)) {
+          matlines(tpp, fl, lty=c(2:5,1), col=c(2:6,1))
+          legend("topright", legend=c("Total", nm_re), lty=1:5, col=1:6)
+        }
       }
       if (open_here)
         dev.off()
@@ -291,7 +303,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     #browser()
     vc=plotsp(file.path(rd, "rate.pdf"), res$vsp, "Reaction rates", "Rate 1/[Time]", NULL)
     # pdf with fluxes (S*v)
-    fc=plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL)
+    fc=plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL, res$stofull)
     # pdf with restored (integrated) metabs
     grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
     inames=colnames(bspline::bsppar(res$isp)$qw)
@@ -568,7 +580,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   }
   isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
-  if (dls && any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
+  if ((dls || length(ina) > 0) && any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
     e=environment(isp)
     #browser()
     ineg=names(ineg[ineg])
