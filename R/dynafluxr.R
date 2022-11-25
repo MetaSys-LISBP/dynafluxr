@@ -427,13 +427,23 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   dtp=diff(tp)
   np=length(tp)
   tpp=tp[1L]+c(0.,cumsum(rep(dtp/npp, each=npp)))
-  # fit measured metabs
+  # prepare mono
   if (length(monotone) > 1L) {
     mono=monotone[colnames(mf)[-1L]]
   } else {
     mono=monotone
   }
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=min(dtp[dtp != 0], na.rm=TRUE)/10., trace=0), estSD=TRUE)
+  # estimate nki with biggest d2 in variance
+  # this nki will be used for var_ref estimation for chi2 test
+  nki_test=seq(max(0, nki-5), nki+5)
+  err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
+  var_test=sapply(nki_test, function(k) {s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=FALSE); colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)})
+  i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
+  var_ref=na.omit(var_test[,i_ref])
+  #print(list(nki_test, var_test, i_ref, var_ref))
+  
+  # fit measurements
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=TRUE)
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
@@ -595,12 +605,11 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   risp=bspline::par2bsp(nsp, qw0-pari$qw, parm$xk)
   #browser()
   # chi2 test
-  # varm: variance of fitted metabs
-  varm=apply(mf[,-1L]-msp(mf$Time, colnames(mf)[-1L]), 2L, stats::var, na.rm=TRUE)
-  chi2=colSums(as.matrix(mf[,-1L]-isp(mf$Time, colnames(mf)[-1L]))**2, na.rm=TRUE)/varm
+  rss=colSums(as.matrix(mf[,-1L]-isp(mf$Time, colnames(mf)[-1L]))**2, na.rm=TRUE)
+  chi2=rss/var_ref
   df=colSums(!is.na(mf[,-1L]))-(if(dls) nrow(qwv) else nwm)
   pval=stats::pchisq(chi2, df=df, lower=FALSE)
-  chi2tab=data.frame(varm=varm, df=df, chi2=chi2, pval=pval)
+  chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
   #browser()
   
   res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (dls) stoinv else NULL, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab)
