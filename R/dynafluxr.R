@@ -433,16 +433,15 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   } else {
     mono=monotone
   }
-  # estimate nki with biggest d2 in variance
-  # this nki will be used for var_ref estimation for chi2 test
+  # estimate var_ref with biggest d2 in variance (for chi2 test)
   nki_test=seq(max(0, nki-5), nki+5)
-  err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
-  var_test=sapply(nki_test, function(k) {s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=FALSE); colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)})
+  var_test=sapply(nki_test, function(k) {s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono, positive=1, lieq=lieq, estSD=FALSE); colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)})
   i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
   var_ref=na.omit(var_test[,i_ref])
   #print(list(nki_test, var_test, i_ref, var_ref))
   
   # fit measurements
+  err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
   msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=TRUE)
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))

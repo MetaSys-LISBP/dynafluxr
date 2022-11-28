@@ -2,8 +2,8 @@
 title: "Metabolic Flux Dynamics in Glycolysis with `dynafluxr`"
 output: rmarkdown::html_vignette
 author:
-  - Serguei Sokol^[TBI, Université de Toulouse, CNRS, INRAE, INSA, Toulouse, France]
-date: 2022-11-08
+  - "Serguei Sokol^[TBI, Université de Toulouse, CNRS, INRAE, INSA, Toulouse, France] ^[MetaboHUB, National Infrastructure of Metabolomics and Fluxomics, Toulouse 31077, France]"
+date: 2022-11-28
 vignette: >
   %\VignetteIndexEntry{glyco}
   %\VignetteEngine{knitr::rmarkdown}
@@ -21,7 +21,6 @@ knitr::opts_chunk$set(
 
 ```{r setup}
 library(dynafluxr)
-library(bspline)
 ```
 ## Introduction
 
@@ -213,12 +212,13 @@ resk=lapply(1:6, function(k) {
   r
 })
 ```
-Starting from value `k=3`, the fit looks satisfactory. Let see what says $chi^2$ test:
+Starting from value `k=3`, the fits look satisfactory. Let see what says $\chi^2$ test:
 ```{r}
-for (r in resk)
-  print(r$chi2tab)
+for (k in 1:6)
+  cat("k=",k,"\n")
+  print(resk[[k]]$chi2tab)
 ```
-We can see that $p$-value is above 0.05 for all metabolites only for k=5. We will retain this value as the given the best fit.
+We can see that $p$-value is above 0.05 for all metabolites only for k=5. We will retain this value as giving the best fit.
 
 The total data fit for k=5 looks like:
 ```{r}
@@ -233,12 +233,12 @@ and reaction rates:
 matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="T")
 legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
 ```
-The curve oscillations are present for some fluxes but as seen before, in this case, it is not due to overfitting but reflects system behavior through measured data.
+The curve oscillations are present for some fluxes but as seen before and based on $\chi^2$ test, in this case, it is not due to overfitting but reflects system behavior through measured data.
 
 In the result files, the rates are plotted with semi-transparent error bands ±2·SD. Let do it here too:
 ```{r}
-nmreac=colnames(bsppar(res$vsp)$qw)
-matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="T")
+nmreac=colnames(res$sto)
+matplot(res$tpp, res$vsp(res$tpp, nmreac), t="l", ylab="Rate [1/s]", xlab="T")
 tppr=c(res$tpp, rev(res$tpp))
 ireac=0
 for (reac in nmreac) {
@@ -250,16 +250,16 @@ for (reac in nmreac) {
 legend("topright", nmreac, lty=1:5, col=1:6, cex=0.75)
 ```
 
-Having estimated rates, allow us to explore details of metabolic fluxes. We can have not only the total flux $\frac{dM_i}{dt}$ but all its comonents coming from involved reactions $S_{ij}v_j$. For PYR, it gives:
+Having estimated rates, we can now explore details of metabolic fluxes. Not only we have the total flux $\frac{dM_i}{dt}$ but also all its components coming from involved reactions $S_{ij}v_j$. For PYR, it gives:
 ```{r}
 nm="PYR"
-jnz=names(which(res$stofull[nm,] != 0)) # reactions involved in PYR mass balance
-fl=t(res$stofull[nm,jnz]*t(res$vsp(res$tpp, jnz)))
-fl=cbind(res$fsp(res$tpp, nm), fl)
-matplot(res$tpp, fl, t="l", ylab="Flux [mM/s]", xlab="Time [s]", main="PYR flux detail")
+jnz=names(which(res$stofull[nm,] != 0)) # non-zero coeffs, i.e. reactions involved in PYR mass balance
+fl=t(res$stofull[nm,jnz]*t(res$vsp(res$tpp, jnz))) # each rate v_j is multiplied by S_ij
+fl=cbind(res$fsp(res$tpp, nm), fl) # add total flux
+matplot(res$tpp, fl, t="l", ylab="Flux [mM/s]", xlab="Time [s]", main="PYR flux components")
 legend("topright", legend=c("Total", jnz), lty=1:5, col=1:6)
 ```
 
 ## Conclusion
 
-In this vignette, we have shown a step-by-step procedure for reaction rate estimation from time-series metabolite measurements and a stoichiometric model. We have seen how package parameters can be chosen, how fit quality can be evaluated and how data can be presented and exploited. Based on this vignette, user should be ready to work with his own data set and model.
+In this vignette, we have shown a step-by-step procedure for reaction rate estimation from time-series metabolite measurements and a stoichiometric model. We have seen how package parameters can be chosen, how fit quality can be evaluated and how data can be presented and exploited. Based on this vignette, user should be ready to work with his own data set and stoichiometric model.
