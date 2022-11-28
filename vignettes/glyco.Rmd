@@ -97,7 +97,7 @@ matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="T", main="GLC")
 matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
 ```
 
-Looks good now. When using `dynafluxr`, we have no option to constraint B-splines to non negative values, because it is done automatically. On the other hand, we do need to indicate which specie is supposed to be monotonously decreasing or increasing. It can be be done with `--mono MONO` option where `MONO` is a file name appropriately formatted to indicate which metabolite is increasing and which is decreasing. It can also be done with options `--incresing` and `--decreasing` with corresponding coma separated lists of specie names. It is this last option that we will use with `dynafluxr` but for now, let check some other metabolites, e.g. pyruvate (PYR) to be sure that the fit looks good too:
+Looks good now. In `dynafluxr`, we have no option to constraint B-splines to non negative values, because it is done automatically. On the other hand, we do need to indicate which specie is supposed to be monotonously decreasing or increasing. It can be be done with `--mono MONO` option where `MONO` is a file name appropriately formatted to indicate which metabolite is increasing and which is decreasing. It can also be done with options `--incresing` and `--decreasing` with corresponding coma separated lists of specie names. It is this last option that we will use with `dynafluxr` but for now, let check some other metabolites, e.g. pyruvate (PYR) to be sure that the fit looks good too:
 ```{r, fig.width=6, fig.height=4}
 matplot(mf$Time, msp(mf$Time, "PYR"), t="l", ylab="C", xlab="T", main="PYR")
 matpoints(mf$Time, mf[,"PYR"], pch="o", cex=0.5)
@@ -105,7 +105,7 @@ matpoints(mf$Time, mf[,"PYR"], pch="o", cex=0.5)
 
 Looks OK, so we are set to move to the next step.
 
-## Fist estimate of fluxes with `dynafluxr`
+## First estimate of fluxes with `dynafluxr`
 
 We try `dynafluxr::cli()` (Command Line Interface) function with minimal options, just indicating measurement data, stoichiometric model and, as seen before, that GLC must be monotonously decreasing (`--decreasing` is abbreviated to `--decr`):
 
@@ -175,7 +175,7 @@ legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
 plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="T", ylab="C", ylim=range(res$mf$PYR), main="PYR")
 points(res$tp, res$mf$PYR, pch="o", cex=0.5)
 ```
-There is some progress in fit quality but PYR is still not well fitted. We try to add next divergin metabolites to NA: BPG (a little bit buried in the plot) and ACCOA.
+There is some progress in fit quality but PYR is still not well fitted. We try to add next diverging metabolites to NA: BPG (a little bit buried in the plot) and ACCOA.
 ```{r}
 res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA"))
 nmall=rownames(res$sto)
@@ -201,25 +201,28 @@ legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
 ```
 It can be observed some oscillations in reaction rates and we must check if they don't come from a possible overfitting.
 
-## Resolving problem of overfitting
+## Exploring problem of overfitting
 
-By default, the number of internal knots used for fitting is 5. Let try smaller values (1, 2 and 3) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:
+By default, the number of internal knots used for fitting is 5. Let few values under and above (1 to 6) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:
 ```{r}
-res1=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", "1"))
-res2=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", "2"))
-res3=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", "3"))
-layout(t(1:3))
-plot(res1$tpp, res1$isp(res1$tpp, "PYR"), main="PYR k=1", ylab="C", xlab="T", t="l")
-points(res1$tp, res1$mf$PYR, pch="o", cex=0.5)
-plot(res2$tpp, res2$isp(res2$tpp, "PYR"), main="PYR k=2", ylab="C", xlab="T", t="l")
-points(res2$tp, res2$mf$PYR, pch="o", cex=0.5)
-plot(res3$tpp, res$isp(res3$tpp, "PYR"), main="PYR k=3", ylab="C", xlab="T", t="l")
-points(res3$tp, res3$mf$PYR, pch="o", cex=0.5)
-
+layout(matrix(1:6, nrow=2, byrow=TRUE))
+resk=lapply(1:6, function(k) {
+  r=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", k))
+  plot(r$tpp, r$isp(r$tpp, "PYR"), main=paste0("PYR k=",k,sep=""), ylab="C", xlab="T", t="l")
+  points(r$tp, r$mf$PYR, pch="o", cex=0.5)
+  r
+})
 ```
-The value `k=3` seems to provide satisfactory fit. The total data fit gives:
+Starting from value `k=3`, the fit looks satisfactory. Let see what says $chi^2$ test:
 ```{r}
-res=res3
+for (r in resk)
+  print(r$chi2tab)
+```
+We can see that $p$-value is above 0.05 for all metabolites only for k=5. We will retain this value as the given the best fit.
+
+The total data fit for k=5 looks like:
+```{r}
+res=resk[[5L]]
 nm=colnames(res$mf)[-1L]
 matplot(res$tpp, res$isp(res$tpp, nm), t="l")
 matpoints(res$tp, res$mf[,nm], pch="o", cex=0.5)
@@ -230,12 +233,7 @@ and reaction rates:
 matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="T")
 legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
 ```
-The curve oscillations have disappeared and we still have a good measurement fit with `k=3`. We can conclude that for `k=5` they were due to overfitting. The overall fit quality can be confirmed with $\chi^2$-test results:
-```{r}
-print(res$chi2tab)
-```
-
-Despite a slight variance increasing, the $p$-values are increased compared to `k=5` which is a good news. The $p$-value increased because of lowering the number of estimated parameters, i.e. increasing degrees of freedom from 180 to 182.
+The curve oscillations are present for some fluxes but as seen before, in this case, it is not due to overfitting but reflects system behavior through measured data.
 
 In the result files, the rates are plotted with semi-transparent error bands ±2·SD. Let do it here too:
 ```{r}
@@ -250,6 +248,16 @@ for (reac in nmreac) {
   ireac=ireac+1
 }
 legend("topright", nmreac, lty=1:5, col=1:6, cex=0.75)
+```
+
+Having estimated rates, allow us to explore details of metabolic fluxes. We can have not only the total flux $\frac{dM_i}{dt}$ but all its comonents coming from involved reactions $S_{ij}v_j$. For PYR, it gives:
+```{r}
+nm="PYR"
+jnz=names(which(res$stofull[nm,] != 0)) # reactions involved in PYR mass balance
+fl=t(res$stofull[nm,jnz]*t(res$vsp(res$tpp, jnz)))
+fl=cbind(res$fsp(res$tpp, nm), fl)
+matplot(res$tpp, fl, t="l", ylab="Flux [mM/s]", xlab="Time [s]", main="PYR flux detail")
+legend("topright", legend=c("Total", jnz), lty=1:5, col=1:6)
 ```
 
 ## Conclusion

@@ -1,7 +1,7 @@
 Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of Metabolites
-Version: 0.12.2
+Version: 0.12.3
 Author: Serguei Sokol <sokol@insa-toulouse.fr>
 Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
 Description: Reaction rate dynamics can be retrieved from time-series measurements
