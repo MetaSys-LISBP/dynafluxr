@@ -13,7 +13,8 @@ fdyn(
   monotone = 0,
   dls = FALSE,
   atomlen = NULL,
-  npp = 10L
+  npi = 300L,
+  wsd = FALSE
 )
 }
 \arguments{
@@ -53,9 +54,8 @@ will contain \code{lsp} and \code{ilsp} fields which
 are a B-spline function representing atom balance over msp and isp splines.
 (default NULL, i.e. no atom balance will be provided)}
 
-\item{npp}{Integer scalar, indicates a number of subintervals to which
-each time interval will be subdivided to produce smoother plots.
-(default 10)}
+\item{npi}{Integer scalar, indicates a number of plot intervals to produce smooth plots.
+(default 300)}
 }
 \value{
 List with following components:

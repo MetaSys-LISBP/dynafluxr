@@ -123,8 +123,11 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     make_option(c("--dls"), action="store_true", default=FALSE,
       help="use Differential Least Squares formulation (default: FALSE)"
     ),
-    make_option(c("--npp"), type="integer", default=10, help=
-      "Number of sub-intervals in each time interval for smooth curve plotting
+    make_option(c("--wsd"), action="store_true", default=FALSE,
+      help="weight Integral Least Squares by square root of covariance matrix (default: FALSE)"
+    ),
+    make_option(c("--npi"), type="integer", default=300, help=
+      "Number of plot intervals for smooth curve plotting
   [default %default]"
     ),
     make_option(c("--fsd"), type="double", default=2., help=
@@ -204,7 +207,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     mf[,lna]=rep(NA, nrow(mf))
   }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npp=opt$npp)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -305,6 +308,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     # pdf with fluxes (S*v)
     fc=plotsp(file.path(rd, "flux.pdf"), res$fsp, "Total fluxes (S\u00b7v)", "Flux [Conctr]/[Time]", NULL, res$stofull)
     # pdf with restored (integrated) metabs
+#browser()
     grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
     inames=colnames(bspline::bsppar(res$isp)$qw)
     tmp=matrix(NA_real_, nrow(mf), length(inames)) # inject here mf values
@@ -325,13 +329,16 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     write.table(cbind(Time=tpp, fc), file=file.path(rd, "flux.tsv"), sep="\t", quote=FALSE, row.names=FALSE)
     # .RData
     save(res, file=file.path(rd, "env.RData"))
+    # stats
+    write.table(res$chi2tab, file=file.path(rd, "stats.tsv"), sep="\t", quote=FALSE)
     # Readme.md
+#browser()
     cat(file=file.path(rd, "Readme.md"), sep="\n",
       "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
-      paste0("This is the result files produced by dynafluxr R package on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
+      paste0("This is the result files produced by dynafluxr R package (v", packageVersion("dynafluxr"), ") on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
       "The command to reproduce these results is:", "",
       paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
-      "", "##File contents", "",
+      "", "## File contents", "",
       " - `specie.pdf`: concentration plots (fitted by B-spline);",
       " - `ispecie.pdf`: estimated concentration plots vs Time (by integration of *S\u00b7v*);",
       atomline,
@@ -342,7 +349,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       " - `ispeci.tsv`: estimated concentration table;",
       " - `rate.tsv`: rate table;",
       " - `flux.tsv`: flux table;",
-      " - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('env.RData', envir=e)` and then accessed as e.g. `ls(e$res)`;",
+      " - `stats.tsv`: table with chi2 tests per compound;",
+      paste0(" - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('", file.path(rd, "env.RData"), "', envir=e)` and then used to retrieve e.g. integrated compounds as `icmpnd=e$res$isp(e$res$tpp)`;"),
       " - `Readme.md`: this file;"
     )
     # zip files
@@ -384,9 +392,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   will contain \code{lsp} and \code{ilsp} fields which
 #'   are a B-spline function representing atom balance over msp and isp splines.
 #'   (default NULL, i.e. no atom balance will be provided)
-#' @param npp Integer scalar, indicates a number of subintervals to which
-#'   each time interval will be subdivided to produce smoother plots.
-#'   (default 10)
+#' @param npi Integer scalar, indicates a number of plot intervals to produce smooth plots.
+#'   (default 300)
 #' @details
 #'   Each item in \code{lieq} corresponds to a specie and is a
 #'   2 column matrix (Time, Value). Each
@@ -421,12 +428,12 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
 #' @export
-fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npp=10L) {
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE) {
 
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
-  tpp=tp[1L]+c(0.,cumsum(rep(dtp/npp, each=npp)))
+  tpp=seq(tp[1L], tp[np], length.out=npi+1L)
   # prepare mono
   if (length(monotone) > 1L) {
     mono=monotone[colnames(mf)[-1L]]
@@ -514,6 +521,20 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     # positivity constraint matrix u is the same as jtot
     u=rbind(jtot, umono)
     co=double(nrow(u))
+#browser()
+    # prepare R of cov matrix (t(R)%*%R) for weighting
+    if (wsd) {
+      rcovqw0=chol(parm$covqw)
+      rcovqw0=t(backsolve(rcovqw0, diag(ncol(rcovqw0))))
+      isdy0=structure(rep(1./mean(parm$sdy), nmet), names=rownames(sto))
+      isdy0[names(parm$sdy)]=1./parm$sdy;
+      # weight jtot and qwm0 by rcov
+      for (im in seq_len(nmet)) {
+        ir=seq(nwm)+nwm*(im-1L)
+        jtot[ir,]=isdy0[im]*(rcovqw0%*%jtot[ir,])
+        qwm0[,im]=isdy0[im]*(rcovqw0%*%qwm0[,im])
+      }
+    }
     # solve ILS
     st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
     # extract mst (metabolite starting values) and qwv
@@ -526,14 +547,19 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     # find sd
     ## cov of rhs
     covm0=slam::simple_triplet_zero_matrix(prod(dim(qwm0)))
-    nqr=nrow(qwm0)
-    iqr=seq_len(nqr)
-    for (m in colnames(parm$qw)) {
-      im=match(m, colnames(qwm0))
-      i=(im-1L)*nqr+iqr
-      covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
+    if (wsd) {
+      i=seq_len(ncol(covm0))
+      covm0[cbind(i,i)]=1.
+    } else {
+      nqr=nrow(qwm0)
+      iqr=seq_len(nqr)
+      for (m in colnames(parm$qw)) {
+        im=match(m, colnames(qwm0))
+        i=(im-1L)*nqr+iqr
+        covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
+      }
     }
-    ## sdv of jtot
+    ## svd of jtot
     s=base::svd(jtot) # it is supposed to be full rank, otherwise lsi() would stop already
     jinv=tcrossprod(arrApply::arrApply(s$v, 2, "multv", v=1./s$d), s$u) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))

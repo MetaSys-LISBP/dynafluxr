@@ -214,9 +214,10 @@ resk=lapply(1:6, function(k) {
 ```
 Starting from value `k=3`, the fits look satisfactory. Let see what says $\chi^2$ test:
 ```{r}
-for (k in 1:6)
+for (k in 1:6) {
   cat("k=",k,"\n")
   print(resk[[k]]$chi2tab)
+}
 ```
 We can see that $p$-value is above 0.05 for all metabolites only for k=5. We will retain this value as giving the best fit.
 
