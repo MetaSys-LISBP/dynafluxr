@@ -1,3 +1,6 @@
+mrowv=function(m,v) # multiply each m column by a corresponding element from v vector
+  arrApply::arrApply(m, 2, "multv", v=v)
+
 #' Function to be called from shell command line
 #'
 #' @param args Character vector, command line parameters (default
@@ -479,7 +482,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   colnames(qwd0)=rownames(sto)
   qwd0[,colnames(qwd)]=qwd
 
-  # calculates weights for fluxes
+  # calculates B-splines for fluxes
   if (!dls) {
     # build integral LS
     # qwm0: metab coeffs including 0s, it will be rhs
@@ -492,7 +495,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     # integration matrix (cumsum(...))
     ima=diag(nrow=nwm-1)
     ima=(row(ima)>=col(ima))+0.
-    ima=rbind(0., arrApply::arrApply(ima, 2, "multv", v=diff(pard$xk, lag=nsp)/nsp))
+    ima=rbind(0., mrowv(ima, diff(pard$xk, lag=nsp)/nsp))
     # f2m: ima%*%qwv%*%t(sto)+rep(1,nkmet)%o%mstart
     jqw=aperm(ima%o%t(sto), c(1L,4L,2L,3L))
     dim(jqw)=c(prod(dim(jqw)[1L:2L]), prod(dim(jqw)[3L:4L]))
@@ -522,7 +525,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     u=rbind(jtot, umono)
     co=double(nrow(u))
 #browser()
-    # prepare R of cov matrix (t(R)%*%R) for weighting
+    # prepare chol factor of cov matrix (t(R)%*%R) for weighting
     if (wsd) {
       rcovqw0=chol(parm$covqw)
       rcovqw0=t(backsolve(rcovqw0, diag(ncol(rcovqw0))))
@@ -561,7 +564,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     }
     ## svd of jtot
     s=base::svd(jtot) # it is supposed to be full rank, otherwise lsi() would stop already
-    jinv=tcrossprod(arrApply::arrApply(s$v, 2, "multv", v=1./s$d), s$u) # generalized inverse of jtot
+    jinv=tcrossprod(mrowv(s$v, 1./s$d), s$u) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
@@ -571,32 +574,62 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   } else {
     # differential LS
     # generalized sto inverse
-    st=system.time({
-    s=svd(sto)
-    d=s$d
-    d[d <= d[1L]*1.e-10]=0.
-    d[d != 0.]=1./d[d != 0.]
-    stoinv=s$v%*%(d*t(s$u))
-    dimnames(stoinv)=rev(dimnames(sto))
-    # solve dLS
-    qwv=tcrossprod(qwd0, stoinv)
-    })
-    # find sd
+    # prepare chol factor of cov matrix (t(R)%*%R) for weighting
     ## estimate cov of qwd
     dm=bspline::dmat(nrow(parm$qw), parm$xk, parm$n) # diff matrix
-    sdd=sqrt(diag(tcrossprod(dm%*%parm$covqw, dm)))%o%parm$sdy
-    #sdd=sdd[,!is.na(parm$sdy),drop=FALSE]
-    sdd0=matrix(0., nrow=nrow(sdd), ncol=nmet)
-    colnames(sdd0)=rownames(sto)
-    sdd0[,colnames(sdd)]=sdd
-    sit=t(stoinv)
-    sdfl=matrix(0., nrow=nrow(sdd0), ncol=nflux)
-    for (i in seq_len(nrow(sdd))) {
-      di=sdd0[i,]
-      dsit=di*sit
-      for (j in seq_len(ncol(sto)))
-        sdfl[i,j]=sqrt(dsit[,j]%*%dsit[,j])
+    covqwd=tcrossprod(dm%*%parm$covqw, dm)
+    st=system.time({
+    if (wsd) {
+      rcovqwd0=chol(covqwd)
+      rcovqwd0i=t(backsolve(rcovqwd0, diag(ncol(rcovqwd0))))
+      isdy0=structure(rep(1./mean(parm$sdy), nmet), names=rownames(sto))
+      isdy0[names(parm$sdy)]=1./parm$sdy;
+      jtot=aperm(diag(nrow(qwd0))%o%t(sto), c(1L,4L,2L,3L))
+      dim(jtot)=c(prod(dim(jtot)[1L:2L]), prod(dim(jtot)[3L:4L]))
+      # weight qwd0 & jtot by rcov
+      qwd0=structure(mrowv(rcovqwd0i%*%qwd0, isdy0), dimnames=list(NULL, names(isdy0)))
+      for (im in seq_len(nmet)) {
+        ir=seq(nwv)+nwv*(im-1L)
+        jtot[ir,]=isdy0[im]*(rcovqwd0i%*%jtot[ir,])
+      }
+      # solve weighted dLS
+      ## svd of jtot
+      s=base::svd(jtot)
+      d=s$d
+      d[d <= d[1L]*1.e-10]=0.
+      d[d != 0.]=1./d[d != 0.]
+      jinv=tcrossprod(mrowv(s$v, d), s$u) # generalized inverse of jtot
+      qwv=matrix(jinv%*%c(qwd0), nwv, ncol(sto))
+      colnames(qwv)=colnames(sto)
+      # find sd
+      sdfl=sqrt(diag(tcrossprod(jinv)))
+      dim(sdfl)=c(nwv, nflux)
+      colnames(sdfl)=colnames(sto)
+    } else {
+      # solve plain dLS
+      s=svd(sto)
+      d=s$d
+      d[d <= d[1L]*1.e-10]=0.
+      d[d != 0.]=1./d[d != 0.]
+      stoinv=s$v%*%(d*t(s$u))
+      dimnames(stoinv)=rev(dimnames(sto))
+      qwv=tcrossprod(qwd0, stoinv)
+      # find sd
+      sdd=sqrt(diag(covqwd))%o%parm$sdy
+      #sdd=sdd[,!is.na(parm$sdy),drop=FALSE]
+      sdd0=matrix(0., nrow=nrow(sdd), ncol=nmet)
+      colnames(sdd0)=rownames(sto)
+      sdd0[,colnames(sdd)]=sdd
+      sit=t(stoinv)
+      sdfl=matrix(0., nrow=nrow(sdd0), ncol=nflux)
+      for (i in seq_len(nrow(sdd))) {
+        di=sdd0[i,]
+        dsit=di*sit
+        for (j in seq_len(ncol(sto)))
+          sdfl[i,j]=sqrt(dsit[,j]%*%dsit[,j])
+      }
     }
+    })
   }
   #print(st)
   # rate splines
@@ -611,7 +644,11 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     const[names(mst)]=mst
     #browser()
   } else {
-    const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+    #const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+    #least squares
+    est=colMeans(bspline::ibsp(fsp)(tp, colnames(mf)[-1L]))
+    meas=colMeans(mf[,-1L])
+    const[colnames(mf)[-1L]]=meas-est
   }
   isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
@@ -637,7 +674,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
   #browser()
   
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, invsto=if (dls) stoinv else NULL, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)

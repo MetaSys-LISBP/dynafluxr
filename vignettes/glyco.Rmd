@@ -47,7 +47,7 @@ The reactions are written as in following example:
 fsto=system.file("dataglyco/network_PRO.txt", package="dynafluxr")
 cat(head(readLines(fsto)), sep="\n")
 ```
-The first field separated by tabulation is reaction name then reaction itself where species are separated by " + " sign and possibly preceded by a stoichiometric coefficient with " * " sign.
+The first field separated by tabulation is a reaction name then reaction itself where species are separated by " + " sign and possibly preceded by a stoichiometric coefficient with " * " symbol.
 
 We start by gathering example files in a freshly created working directory, say `glyco/`:
 ```{r}
@@ -202,7 +202,7 @@ It can be observed some oscillations in reaction rates and we must check if they
 
 ## Exploring problem of overfitting
 
-By default, the number of internal knots used for fitting is 5. Let few values under and above (1 to 6) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:
+By default, the number of internal knots used for fitting is 5. Let try few values under and above (1 to 6) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:
 ```{r}
 layout(matrix(1:6, nrow=2, byrow=TRUE))
 resk=lapply(1:6, function(k) {
