@@ -467,6 +467,17 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   } else {
     sto=stofull
   }
+  if (nrow(sto) < ncol(sto))
+    stop("Number of species in stoichiometric matrix (", nrow(sto), ") is lower than reaction number (", ncol(sto), ").")
+  # check rank and make stoinv
+  s=svd(sto)
+  d=s$d
+  srank=sum(d > d[1L]*1.e-10)
+  if (srank < ncol(sto))
+    stop("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", ncol(sto), ").")
+  stoinv=s$v%*%(t(s$u)/d)
+  dimnames(stoinv)=rev(dimnames(sto))
+
   parm=bspline::bsppar(msp)
   nmet=nrow(sto)
   nmetfull=nrow(stofull)
@@ -563,8 +574,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       }
     }
     ## svd of jtot
-    s=base::svd(jtot) # it is supposed to be full rank, otherwise lsi() would stop already
-    jinv=tcrossprod(mrowv(s$v, 1./s$d), s$u) # generalized inverse of jtot
+    sj=base::svd(jtot) # it is supposed to be of full rank
+    jinv=tcrossprod(mrowv(sj$v, 1./sj$d), sj$u) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
@@ -607,12 +618,6 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       colnames(sdfl)=colnames(sto)
     } else {
       # solve plain dLS
-      s=svd(sto)
-      d=s$d
-      d[d <= d[1L]*1.e-10]=0.
-      d[d != 0.]=1./d[d != 0.]
-      stoinv=s$v%*%(d*t(s$u))
-      dimnames(stoinv)=rev(dimnames(sto))
       qwv=tcrossprod(qwd0, stoinv)
       # find sd
       sdd=sqrt(diag(covqwd))%o%parm$sdy
