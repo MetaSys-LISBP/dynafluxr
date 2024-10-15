@@ -1,5 +1,20 @@
+#' square of L2 norm
+norm2=function(x) sum(x*x, na.rm=TRUE)
+
+#' matrix row-vector multiplication term-by-term.
 mrowv=function(m,v) # multiply each m column by a corresponding element from v vector
   arrApply::arrApply(m, 2, "multv", v=v)
+
+#' Generalized inverse matrix based on svd
+sinv=function(a, s=base::svd(a), tol=1.e-10) {
+  d=s$d
+  d[d <= d[1L]*tol]=0.
+  d[d != 0.]=1./d[d != 0.]
+  inv=tcrossprod(mrowv(s$v, d), s$u) # generalized inverse
+  dimnames(inv)=rev(dimnames(a))
+  inv
+}
+
 
 #' Function to be called from shell command line
 #'
@@ -43,102 +58,112 @@ mrowv=function(m,v) # multiply each m column by a corresponding element from v v
 #' @importFrom optparse make_option OptionParser parse_args print_help
 #' @importFrom utils read.delim write.table zip
 #' @importFrom stats setNames
-#' @importFrom graphics legend matlines matpoints polygon points lines 
+#' @importFrom graphics legend matlines matpoints polygon points lines
 #' @export
 cli=function(args=commandArgs(trailingOnly=TRUE)) {
   Specie <- Time <- Value <- NULL # to keep 'R CMD check' calm about subset() arguments
-  olist=list(
-    make_option(c("-m", "--meas"), type="character",
-      help="Measurement file in TSV (tab separated value) format,
-  one specie per column. Time column name should start with 'Time'
-  and there should be only one such column.
-  Specie names should be the same as in stoichiometric model.
-  Specie measurements whose name is absent in STO file, will be ignored.
-  Empty cells are interpreted as NA (non available) and not counted in spline fit.
-  If a specie has a full column of NA, it will be removed from stoichiometric
-  balance and thus from rate least squares. This is different from a specie
-  which is simply absent from measurement file. In the latter case, a specie
-  does account in stoichiometric balance but is considered as 0."
-    ),
-    make_option(c("-s", "--sto"), type="character",
-      help="File name with stoichiometric model in plain text format, e.g.:
+  if (TRUE) {
+    olist=list(
+      make_option(c("-m", "--meas"), type="character",
+        help="Measurement file in TSV (tab separated value) format,
+    one specie per column. Time column name should start with 'Time'
+    and there should be only one such column.
+    Specie names should be the same as in stoichiometric model.
+    Specie measurements whose name is absent in STO file, will be ignored.
+    Empty cells are interpreted as NA (non available) and not counted in spline fit.
+    If a specie has a full column of NA, it will be removed from stoichiometric
+    balance and thus from rate least squares. This is different from a specie
+    which is simply absent from measurement file. In the latter case, a specie
+    does account in stoichiometric balance but is considered as 0."
+      ),
+      make_option(c("-s", "--sto"), type="character",
+        help="File name with stoichiometric model in plain text format, e.g.:
 
-  vGLK\tGLCi + P -> G6P
+    vGLK\tGLCi + P -> G6P
 
-  Here 'vGLK' is a reaction name followed by a tab character;
-  'GLCi', 'P' and 'G6P' are specie names;
-  '->' reaction side separator. A symbol '<->' can be used for
-  reversible reactions. However, for this application it is
-  irrelevant if a reaction is reversible or not;
-  '+' is separator of species on the same reaction side.
-  Stoichiometric coefficients different from 1 can be used with ' * '
-  sign, e.g.:
+    Here 'vGLK' is a reaction name followed by a tab character;
+    'GLCi', 'P' and 'G6P' are specie names;
+    '->' reaction side separator. A symbol '<->' can be used for
+    reversible reactions. However, for this application it is
+    irrelevant if a reaction is reversible or not;
+    '+' is separator of species on the same reaction side.
+    Stoichiometric coefficients different from 1 can be used with ' * '
+    sign, e.g.:
 
-  vTreha\t2 * G6P + P -> Trh
+    vTreha\t2 * G6P + P -> Trh
 
-  here '2' is a such coefficient. The spaces ' ' around '*' are important."
-    ),
-    make_option(c("-k", "--knot"), type="integer", default=5, help=
-      "Internal knot number for B-splines fitting specie and rate dynamics
-  [default %default]"
-    ),
-    make_option(c("-n", "--norder"), type="integer", default=4, help=
-      "B-splines polynomial order for specie kinetics. The rate dynamics will have
-  order 'norder-1' [default %default]"
-    ),
-    make_option(c("--lna"), type="character", default="",
-      help="List of coma separated NA species, e.g. '--lna=FBP,F6P'. If a specie is present both in MEAS file and in LNA list, it is overwritten with NAs"
-    ),
-    make_option(c("-c", "--constr"), type="character",
-      help="Constraint file in TSV format, 3 column table: Time, Specie, Value.
-  Specie names should be the same as in stoichiometric model."
-    ),
-    make_option(c("-a", "--atom"), type="character",
-      help="Atom length file in TSV format, 2 column table: Specie, Atom_length (in this order).
-  Specie names should be the same as in stoichiometric model. Atom_length
-  column must contain integer non negative values."
-    ),
-    make_option(c("--mono"), type="character",
-      help="Monotonicity file in TSV format, 2 column table: Specie, Value 
-  (in this order).
-  Specie names should be the same as in stoichiometric model. 'Value'
-  can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing).
-  For example, substrates that are only consumed could get more
-  realistic fit if corresponding 'Value' is set to -1. Cf. also options --increasing and --decreasing."
-    ),
-    make_option(c("--increasing"), type="character", default="",
-      help="List of coma separated species that are supposed to be monotonously increasing, e.g. '--increasing=LAC,ETOH'. If a specie is present both in file MONO and in this option,
-  this option takes the precedence."
-    ),
-    make_option(c("--decreasing"), type="character", default="",
-      help="List of coma separated species that are supposed to be monotonously decreasing, e.g. '--decreasing=GLC'. If a specie is present both in file MONO and in this option,
-  this option takes the precedence."
-    ),
-    make_option(c("-o", "--out"), type="character",
-      help="Directory (or zip) name to use for result files. By default, measurement name without extension is used. If empty, no results are written to disk (can be useful for programmatic use)."
-    ),
-    make_option(c("--skip"), type="integer", default=0L,
-      help="Number of first time points that should be skipped in specie measurements"
-    ),
-    make_option(c("-z", "--zip"), action="store_true", default=FALSE,
-      help="Create zip archive with results (default: FALSE)."
-    ),
-    make_option(c("--dls"), action="store_true", default=FALSE,
-      help="use Differential Least Squares formulation (default: FALSE)"
-    ),
-    make_option(c("--wsd"), action="store_true", default=FALSE,
-      help="weight Integral Least Squares by square root of covariance matrix (default: FALSE)"
-    ),
-    make_option(c("--npi"), type="integer", default=300, help=
-      "Number of plot intervals for smooth curve plotting
-  [default %default]"
-    ),
-    make_option(c("--fsd"), type="double", default=2., help=
-      "SD factor for plotting gray band \u00b1fsd*SD around spline curves. Use '--fsd=0' to cancel these bands. [default %default]"
+    here '2' is a such coefficient. The spaces ' ' around '*' are important."
+      ),
+      make_option(c("-k", "--knot"), type="integer", default=5, help=
+        "Internal knot number for B-splines fitting specie and rate dynamics
+    [default %default]"
+      ),
+      make_option(c("-n", "--norder"), type="integer", default=4, help=
+        "B-splines polynomial order for specie kinetics. The rate dynamics will have
+    order 'norder-1' [default %default]"
+      ),
+      make_option(c("--lna"), type="character", default="",
+        help="List of coma separated NA species, e.g. '--lna=FBP,F6P'. If a specie is present both in MEAS file and in LNA list, it is overwritten with NAs"
+      ),
+      make_option(c("-c", "--constr"), type="character",
+        help="Constraint file in TSV format, 3 column table: Time, Specie, Value.
+    Specie names should be the same as in stoichiometric model."
+      ),
+      make_option(c("-a", "--atom"), type="character",
+        help="Atom length file in TSV format, 2 column table: Specie, Atom_length (in this order).
+    Specie names should be the same as in stoichiometric model. Atom_length
+    column must contain integer non negative values."
+      ),
+      make_option(c("--mono"), type="character",
+        help="Monotonicity file in TSV format, 2 column table: Specie, Value
+    (in this order).
+    Specie names should be the same as in stoichiometric model. 'Value'
+    can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing).
+    For example, substrates that are only consumed could get more
+    realistic fit if corresponding 'Value' is set to -1. Cf. also options --increasing and --decreasing."
+      ),
+      make_option(c("--increasing"), type="character", default="",
+        help="List of coma separated species that are supposed to be monotonously increasing, e.g. '--increasing=LAC,ETOH'. If a specie is present both in file MONO and in this option,
+    this option takes the precedence."
+      ),
+      make_option(c("--decreasing"), type="character", default="",
+        help="List of coma separated species that are supposed to be monotonously decreasing, e.g. '--decreasing=GLC'. If a specie is present both in file MONO and in this option,
+    this option takes the precedence."
+      ),
+      make_option(c("-o", "--out"), type="character",
+        help="Directory (or zip) name to use for result files. By default, measurement name without extension is used. If empty, no results are written to disk (can be useful for programmatic use)."
+      ),
+      make_option(c("--skip"), type="integer", default=0L,
+        help="Number of first time points that should be skipped in specie measurements"
+      ),
+      make_option(c("-z", "--zip"), action="store_true", default=FALSE,
+        help="Create zip archive with results (default: FALSE)."
+      ),
+      make_option(c("--dls"), action="store_true", default=FALSE,
+        help="use Differential Least Squares formulation (default: FALSE)"
+      ),
+      make_option(c("--wsd"), action="store_true", default=FALSE,
+        help="weight Integral Least Squares by square root of covariance matrix (default: FALSE)"
+      ),
+      make_option(c("--npi"), type="integer", default=300, help=
+        "Number of plot intervals for smooth curve plotting
+    [default %default]"
+      ),
+      make_option(c("--sf"), type="character", default="", help=
+        "Names of species separated by comma ',' for which scailng factors must be estimated.
+    [default %default]"
+      ),
+      make_option(c("--nosf"), type="character", default="", help=
+        "Names of species separated by comma ',' for which scailng factors must NOT be estimated but they are estimated for all others. This option cannot be used simultaneously with '--sf'.
+    [default %default]"
+      ),
+      make_option(c("--fsd"), type="double", default=2., help=
+        "SD factor for plotting gray band \u00b1fsd*SD around spline curves. Use '--fsd=0' to cancel these bands. [default %default]"
+      )
     )
-  )
+  }
   parser=OptionParser(usage = "Rscript --vanilla -e 'dynafluxr::cli()' -m|--meas MEAS -s|--sto STO [options]
-  
+
   Retrieve rate dynamics from metabolic kinetics. Results are written in a directory or zip file.\n
   Example: Rscript --vanilla -e 'dynafluxr::cli()' -m data_kinetics.tsv -s glycolysis.txt", option_list=olist)
   opt <- try(parse_args(parser, args=args), silent=TRUE)
@@ -204,13 +229,28 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   } else {
     atomlen=NULL
   }
-  # prepare NA list form --lna
+  # prepare NA list from --lna
   lna=strsplit(opt$lna, ",")[[1L]]
   if (length(lna) > 0L) {
     mf[,lna]=rep(NA, nrow(mf))
   }
+  # prepare nmsf vector from --sf or --nosf
+  nmsf=character(0L)
+  if (nchar(opt$sf)) {
+    if (nchar(opt$nosf))
+      stop("Both of '--sf' (", opt$sf, ") and '--nosf' (", opt$nosf, ") cannot be used simultaneously.")
+    nmsf=sapply(strsplit(opt$sf, ",")[[1L]], trimws)
+    if (any(ibad <- !(nmsf %in% rownames(sto))))
+      stop("Following species were asked for scaling factors but are not present in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+  }
+  if (nchar(opt$nosf)) {
+    nmsf=sapply(strsplit(opt$nosf, ",")[[1L]], trimws)
+    if (any(ibad <- !(nmsf %in% rownames(sto))))
+      stop("Following species were asked for NOT be used with scaling factors but are not present in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+    nmsf=setdiff(rownames(sto), nmsf)
+  }
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd)
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -220,7 +260,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   } else {
     rd=opt$out
   }
-  if (nchar(rd)) {
+  if (nchar(rd)) { # write results
     if (!dir.exists(rd))
       dir.create(rd)
     tp=res$tp
@@ -293,7 +333,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     # pdf with atom balance
     if (length(atomlen) > 0L) {
       pdf(file.path(rd, "atom.pdf"))
-      datom=colSums(t(mf[,-1L])*atomlen[colnames(mf)[-1L]], na.rm=TRUE)
+      datom=colSums(t(res$mf[,-1L])*atomlen[colnames(res$mf)[-1L]], na.rm=TRUE)
       ac=res$asp(tpp)
       iac=res$iasp(tpp)
       plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE), xlab="Time", ylab="Total atom number", t="n")
@@ -316,8 +356,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     inames=colnames(bspline::bsppar(res$isp)$qw)
     tmp=matrix(NA_real_, nrow(mf), length(inames)) # inject here mf values
     colnames(tmp)=inames
-    cnm=intersect(inames, colnames(mf)[-1L]) # NA columns in mf are absent in mc
-    tmp[,cnm]=as.matrix(mf[,cnm])
+    cnm=intersect(inames, colnames(res$mf)[-1L]) # NA columns in mf are absent in mc
+    tmp[,cnm]=as.matrix(res$mf[,cnm])
     ic=plotsp(NULL, res$isp, "Estimated concentrations", "\u222bS\u00b7v dt", tmp)
     dev.off()
     li=list.files(rd, "imet[0-9]+\\.pdf", full.names=TRUE)
@@ -333,7 +373,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     # .RData
     save(res, file=file.path(rd, "env.RData"))
     # stats
-    write.table(res$chi2tab, file=file.path(rd, "stats.tsv"), sep="\t", quote=FALSE)
+    write.table(res$chi2tab, file=file.path(rd, "stats.tsv"), sep="\t", quote=FALSE, col.names=NA)
     # Readme.md
 #browser()
     cat(file=file.path(rd, "Readme.md"), sep="\n",
@@ -366,7 +406,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 }
 
 #' Retrieve flux dynamics from metabolic kinetics
-#' 
+#'
 #' @param mf Data-frame or matrix, specie kinetic measurements.
 #'   Columns must be named with specie names and 'Time'.
 #' @param stofull Full stoichiometric matrix, \code{stofull[i,j]} means reaction 'j' produces
@@ -397,6 +437,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   (default NULL, i.e. no atom balance will be provided)
 #' @param npi Integer scalar, indicates a number of plot intervals to produce smooth plots.
 #'   (default 300)
+#' @param nmsf Character vector, list of species for which scaling factor maust be estimated for --dls.
+#' @param tol Double scalar, tolerance for detecting singular matrices and solving linear systems
 #' @details
 #'   Each item in \code{lieq} corresponds to a specie and is a
 #'   2 column matrix (Time, Value). Each
@@ -431,8 +473,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
 #' @export
-fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE) {
-
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), tol=1.e-10) {
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
@@ -449,7 +490,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
   var_ref=na.omit(var_test[,i_ref])
   #print(list(nki_test, var_test, i_ref, var_ref))
-  
+
   # fit measurements
   err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
   msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=TRUE)
@@ -457,7 +498,12 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
     #browser()
-    sto=stofull[-match(ina, rownames(stofull)),,drop=FALSE]
+    ima=match(ina, rownames(stofull))
+    ibad=which(is.na(ima))
+    if (length(ibad)) {
+      stop("Following names passed to --lna are not recognized: ", paste0(ina[ibad], collapse=", "))
+    }
+    sto=stofull[-ima,,drop=FALSE]
     mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
     e=environment(msp)
     ibad=match(ina, colnames(e$qw))
@@ -472,16 +518,19 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   # check rank and make stoinv
   s=svd(sto)
   d=s$d
-  srank=sum(d > d[1L]*1.e-10)
+  srank=sum(d > d[1L]*tol)
   if (srank < ncol(sto))
     stop("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", ncol(sto), ").")
-  stoinv=s$v%*%(t(s$u)/d)
-  dimnames(stoinv)=rev(dimnames(sto))
-
-  parm=bspline::bsppar(msp)
   nmet=nrow(sto)
   nmetfull=nrow(stofull)
-  nflux=ncol(sto)
+  nrate=ncol(sto)
+  nb_sf=length(nmsf)
+  sf=setNames(double(nb_sf), nmsf)
+  if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(stofull))))
+    stop("following species were asked with scaling factors but are not in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+  stoinv=sinv(sto, s, tol)
+  
+  parm=bspline::bsppar(msp)
   nwm=nrow(parm$qw)
   # first derivatives
   dsp=bspline::dbsp(msp)
@@ -493,7 +542,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   colnames(qwd0)=rownames(sto)
   qwd0[,colnames(qwd)]=qwd
 
-  # calculates B-splines for fluxes
+  # calculates B-splines for reaction rates
   if (!dls) {
     # build integral LS
     # qwm0: metab coeffs including 0s, it will be rhs
@@ -522,10 +571,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       }
       i=names(which(mono > 0))
       umono=aperm(diag(nrow=nwv)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
-      dim(umono)=c(nwv*length(i), nwv*nflux)
+      dim(umono)=c(nwv*length(i), nwv*nrate)
       i=names(which(mono < 0))
       tmp=aperm(diag(nrow=nwv)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
-      dim(tmp)=c(nwv*length(i), nwv*nflux)
+      dim(tmp)=c(nwv*length(i), nwv*nrate)
       umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
       cmono=double(nrow(umono))
     } else {
@@ -556,7 +605,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     mst=p[icnst]
     names(mst)=rownames(sto)
     qwv=p[-icnst]
-    dim(qwv)=c(nwv, nflux)
+    dim(qwv)=c(nwv, nrate)
     colnames(qwv)=colnames(sto)
     # find sd
     ## cov of rhs
@@ -580,9 +629,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
     sdfl=sdp[-icnst]
-    dim(sdfl)=c(nwv, nflux)
+    dim(sdfl)=c(nwv, nrate)
     colnames(sdfl)=colnames(sto)
   } else {
+#browser()
     # differential LS
     # generalized sto inverse
     # prepare chol factor of cov matrix (t(R)%*%R) for weighting
@@ -604,21 +654,57 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
         jtot[ir,]=isdy0[im]*(rcovqwd0i%*%jtot[ir,])
       }
       # solve weighted dLS
-      ## svd of jtot
-      s=base::svd(jtot)
-      d=s$d
-      d[d <= d[1L]*1.e-10]=0.
-      d[d != 0.]=1./d[d != 0.]
-      jinv=tcrossprod(mrowv(s$v, d), s$u) # generalized inverse of jtot
+      jinv=sinv(jtot, tol)
       qwv=matrix(jinv%*%c(qwd0), nwv, ncol(sto))
       colnames(qwv)=colnames(sto)
       # find sd
       sdfl=sqrt(diag(tcrossprod(jinv)))
-      dim(sdfl)=c(nwv, nflux)
+      dim(sdfl)=c(nwv, nrate)
       colnames(sdfl)=colnames(sto)
     } else {
       # solve plain dLS
-      qwv=tcrossprod(qwd0, stoinv)
+      #qwv=tcrossprod(qwd0, stoinv)
+      qwv=structure(double(nrow(qwd0)*ncol(sto)), dim=c(nrow(qwd0), ncol(sto)), dimnames=list(paste0("k", seq_len(nrow(qwd0))), colnames(sto)))
+      if (nb_sf > 0L) { # estimate scaling factors (sf)
+        f_resid=function(x, ...) with(list(...), {
+          isf=seq_along(nmsf)
+          nrc=lengths(dimnm)
+          if (length(x) == 0L) {
+            qwd0sf[,nmsf]=0.
+            c(double(length(nmsf)), tcrossprod(qwd0sf, stoinv))
+          } else {
+            qwv=structure(x[-isf], dim=nrc, dimnames=dimnm)
+            res=tcrossprod(qwv, sto)
+            qwd0sf[,nmsf]=mrowv(qwd0[,nmsf, drop=FALSE], x[isf])
+            res=qwd0sf-res
+            c(diag(pinv%*%res[,nmsf,drop=FALSE]), tcrossprod(res, stoinv))
+          }
+        })
+        f_BAx=function(x, ...) with(list(...), {
+          isf=seq_along(nmsf)
+          nrc=lengths(dimnm)
+          qwv=structure(x[-isf], dim=nrc, dimnames=dimnm)
+          res=tcrossprod(qwv, sto)
+          qwd0sf[,nmsf]=mrowv(qwd0[,nmsf,drop=FALSE], x[isf])
+          res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
+          c(diag(pinv%*%res[,nmsf,drop=FALSE]), tcrossprod(res, stoinv))
+        })
+        pinv=sinv(qwd0[,nmsf,drop=FALSE])
+
+        i_sf=match(nmsf, colnames(qwd0))
+        qwd0sf=qwd0
+        qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+        # solve for x=(sf, qwv)
+        x=gmresls::gmresls(f_resid, f_BAx, nmsf=nmsf, dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0, qwd0sf=qwd0sf)
+        sf[]=x[seq_len(nb_sf)]
+        qwv[]=x[-seq_len(nb_sf)]
+        qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+        environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
+        parm=bsppar(msp)
+        mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
+      }
+
+      #print(c("sf=", sf, "; rss=", norm2(t(qwd0)-sto%*%t(qwv))))
       # find sd
       sdd=sqrt(diag(covqwd))%o%parm$sdy
       #sdd=sdd[,!is.na(parm$sdy),drop=FALSE]
@@ -626,7 +712,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       colnames(sdd0)=rownames(sto)
       sdd0[,colnames(sdd)]=sdd
       sit=t(stoinv)
-      sdfl=matrix(0., nrow=nrow(sdd0), ncol=nflux)
+      sdfl=matrix(0., nrow=nrow(sdd0), ncol=nrate)
       for (i in seq_len(nrow(sdd))) {
         di=sdd0[i,]
         dsit=di*sit
@@ -678,8 +764,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   pval=stats::pchisq(chi2, df=df, lower=FALSE)
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
   #browser()
-  
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab)
+
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab, sf=sf)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)
