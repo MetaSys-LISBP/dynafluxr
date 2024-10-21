@@ -14,7 +14,9 @@ fdyn(
   dls = FALSE,
   atomlen = NULL,
   npi = 300L,
-  wsd = FALSE
+  wsd = FALSE,
+  nmsf = character(0L),
+  tol = 1e-10
 )
 }
 \arguments{
@@ -56,6 +58,14 @@ are a B-spline function representing atom balance over msp and isp splines.
 
 \item{npi}{Integer scalar, indicates a number of plot intervals to produce smooth plots.
 (default 300)}
+
+\item{wsd}{Logical scalar, if TRUE, indicates that differential least squares
+should be resolved with residuals weighted by a factor of covariance matrix.
+(default FALSE, i.e. no weighting is used)}
+
+\item{nmsf}{Character vector, list of species for which scaling factor maust be estimated for --dls.}
+
+\item{tol}{Double scalar, tolerance for detecting singular matrices and solving linear systems}
 }
 \value{
 List with following components:
@@ -78,6 +88,7 @@ List with following components:
   \item{risp:}{ integral residual \code{M - \\u222bS\%*\%v dt} spline function}
   \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
   \item{chi2tab:}{ data-frame with chi2-test results}
+  \item{sf:}{ named scale factor vector}
 }
 }
 \description{

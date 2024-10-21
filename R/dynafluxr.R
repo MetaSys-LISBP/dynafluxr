@@ -1,11 +1,16 @@
 #' square of L2 norm
+#' @noRd
+#' @keywords internal
 norm2=function(x) sum(x*x, na.rm=TRUE)
 
 #' matrix row-vector multiplication term-by-term.
-mrowv=function(m,v) # multiply each m column by a corresponding element from v vector
-  arrApply::arrApply(m, 2, "multv", v=v)
+#' @noRd
+#' @keywords internal
+mrowv=function(m,v) arrApply::arrApply(m, 2, "multv", v=v)
 
 #' Generalized inverse matrix based on svd
+#' @noRd
+#' @keywords internal
 sinv=function(a, s=base::svd(a), tol=1.e-10) {
   d=s$d
   d[d <= d[1L]*tol]=0.
@@ -57,8 +62,10 @@ sinv=function(a, s=base::svd(a), tol=1.e-10) {
 #' @importFrom grDevices cairo_pdf rgb col2rgb pdf dev.off
 #' @importFrom optparse make_option OptionParser parse_args print_help
 #' @importFrom utils read.delim write.table zip
-#' @importFrom stats setNames
+#' @importFrom stats setNames na.omit
 #' @importFrom graphics legend matlines matpoints polygon points lines
+#' @importFrom utils packageVersion
+#' 
 #' @export
 cli=function(args=commandArgs(trailingOnly=TRUE)) {
   Specie <- Time <- Value <- NULL # to keep 'R CMD check' calm about subset() arguments
@@ -378,7 +385,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #browser()
     cat(file=file.path(rd, "Readme.md"), sep="\n",
       "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
-      paste0("This is the result files produced by dynafluxr R package (v", packageVersion("dynafluxr"), ") on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
+      paste0("This is the result files produced by dynafluxr R package (v", utils::packageVersion("dynafluxr"), ") on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
       "The command to reproduce these results is:", "",
       paste0("`Rscript --vanilla -e 'dynafluxr::cli()' ", paste0(shQuote(args), collapse=" "), "`"),
       "", "## File contents", "",
@@ -437,6 +444,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   (default NULL, i.e. no atom balance will be provided)
 #' @param npi Integer scalar, indicates a number of plot intervals to produce smooth plots.
 #'   (default 300)
+#' @param wsd Logical scalar, if TRUE, indicates that differential least squares
+#'   should be resolved with residuals weighted by a factor of covariance matrix.
+#'   (default FALSE, i.e. no weighting is used)
 #' @param nmsf Character vector, list of species for which scaling factor maust be estimated for --dls.
 #' @param tol Double scalar, tolerance for detecting singular matrices and solving linear systems
 #' @details
@@ -466,6 +476,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{risp:}{ integral residual \code{M - \\u222bS\%*\%v dt} spline function}
 #'   \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
 #'   \item{chi2tab:}{ data-frame with chi2-test results}
+#'   \item{sf:}{ named scale factor vector}
 #' }
 #' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
@@ -488,8 +499,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   nki_test=seq(max(0, nki-5), nki+5)
   var_test=sapply(nki_test, function(k) {s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono, positive=1, lieq=lieq, estSD=FALSE); colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)})
   i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
-  var_ref=na.omit(var_test[,i_ref])
-  #print(list(nki_test, var_test, i_ref, var_ref))
+  var_ref=stats::na.omit(var_test[,i_ref])
 
   # fit measurements
   err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
@@ -541,6 +551,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   qwd0=matrix(0., nrow(qwd), nmet)
   colnames(qwd0)=rownames(sto)
   qwd0[,colnames(qwd)]=qwd
+  x=NULL
 
   # calculates B-splines for reaction rates
   if (!dls) {
@@ -622,15 +633,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
         covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
       }
     }
-    ## svd of jtot
-    sj=base::svd(jtot) # it is supposed to be of full rank
-    jinv=tcrossprod(mrowv(sj$v, 1./sj$d), sj$u) # generalized inverse of jtot
+    jinv=sinv(jtot) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
-    sdfl=sdp[-icnst]
-    dim(sdfl)=c(nwv, nrate)
-    colnames(sdfl)=colnames(sto)
+    sdrate=sdp[-icnst]
+    dim(sdrate)=c(nwv, nrate)
+    colnames(sdrate)=colnames(sto)
   } else {
 #browser()
     # differential LS
@@ -642,67 +651,99 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     st=system.time({
     if (wsd) {
       rcovqwd0=chol(covqwd)
-      rcovqwd0i=t(backsolve(rcovqwd0, diag(ncol(rcovqwd0))))
-      isdy0=structure(rep(1./mean(parm$sdy), nmet), names=rownames(sto))
+      rcovqwd0i=backsolve(rcovqwd0, diag(ncol(rcovqwd0)), transpose=TRUE)
+      isdy0=setNames(rep(1./mean(parm$sdy), nmet), rownames(sto))
       isdy0[names(parm$sdy)]=1./parm$sdy;
-      jtot=aperm(diag(nrow(qwd0))%o%t(sto), c(1L,4L,2L,3L))
-      dim(jtot)=c(prod(dim(jtot)[1L:2L]), prod(dim(jtot)[3L:4L]))
+      #jtot=aperm(diag(nrow(qwd0))%o%t(sto), c(1L,4L,2L,3L))
+      #dim(jtot)=c(prod(dim(jtot)[1L:2L]), prod(dim(jtot)[3L:4L]))
       # weight qwd0 & jtot by rcov
-      qwd0=structure(mrowv(rcovqwd0i%*%qwd0, isdy0), dimnames=list(NULL, names(isdy0)))
-      for (im in seq_len(nmet)) {
-        ir=seq(nwv)+nwv*(im-1L)
-        jtot[ir,]=isdy0[im]*(rcovqwd0i%*%jtot[ir,])
-      }
+      qwd0sd=structure(mrowv(rcovqwd0i%*%qwd0, isdy0), dimnames=list(paste0("k", seq_len(nrow(qwd0))), names(isdy0)))
+      #for (im in seq_len(nmet)) {
+      #  ir=seq(nwv)+nwv*(im-1L)
+      #  jtot[ir,]=isdy0[im]*(rcovqwd0i%*%jtot[ir,])
+      #}
       # solve weighted dLS
-      jinv=sinv(jtot, tol)
-      qwv=matrix(jinv%*%c(qwd0), nwv, ncol(sto))
-      colnames(qwv)=colnames(sto)
+      #jinv=sinv(jtot, tol=tol)
+      #qwv=matrix(jinv%*%c(qwd0sd), nwv, ncol(sto))
+      qwv=matrix(0., nwv, ncol(sto))
+      dimnames(qwv)=list(paste0("k", seq_len(nrow(qwv))), colnames(sto))
+      # gmresls
+      x0=c(rep(1., nb_sf), tcrossprod(qwd0, stoinv))
+      f_rbax=function(x, ...) {
+        mc=match.call()
+        with(list(...), {
+          isf=seq_along(nmsf)
+          nrc=lengths(dimnm)
+          qwv=structure(if (nb_sf) x[-isf] else x, dim=nrc, dimnames=dimnm)
+          res=rit%*%tcrossprod(qwv, stosd)
+          qwd0sf[,nmsf]=mrowv(qwd0sd[,nmsf, drop=FALSE], x[isf])
+          if (mc[[1]] == "f_resid") {
+            res=qwd0sf-res
+          } else {
+            res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
+          }
+          # preconditioning
+          c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stosdinv))
+        })
+      }
+      #pinv=if (nb_sf) sinv(qwd0[,nmsf,drop=FALSE]) else matrix(0, 0L, 0L)
+      pinv=if (nb_sf) t(qr.Q(qr((qwd0[,nmsf,drop=FALSE])))) else matrix(0, 0L, 0L)
+
+      i_sf=match(nmsf, colnames(qwd0))
+      qwd0sf=qwd0sd
+      qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+      # solve for x=(sf, qwv)
+      stosd=sto*isdy0
+      qrs=qr(stosd)
+      qt=t(qr.Q(qrs))
+      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, dimnm=dimnames(qwv), pinv=pinv, qwd0sd=qwd0sd, qwd0sf=qwd0sf, stosd=stosd, stosdinv=qt, rit=rcovqwd0i, r=rcovqwd0)
+      sf[]=x[seq_len(nb_sf)]
+      qwv[]=if (nb_sf) x[-seq_len(nb_sf)] else x
+      qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+      environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
+      parm=bsppar(msp)
+      mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
+
       # find sd
-      sdfl=sqrt(diag(tcrossprod(jinv)))
-      dim(sdfl)=c(nwv, nrate)
-      colnames(sdfl)=colnames(sto)
+      #sdrate=sqrt(diag(tcrossprod(jinv)))
+      #dim(sdrate)=c(nwv, nrate)
+      #colnames(sdrate)=colnames(sto)
+      #sdrate=matrix(0., nrow=nrow(sdd0), ncol=nrate)
+      sdrate=structure(sqrt(diag(covqwd))%o%sqrt(diag(tcrossprod(backsolve(qr.R(qrs), qt)))), dimnames=list(NULL, colnames(sto)))
     } else {
       # solve plain dLS
       #qwv=tcrossprod(qwd0, stoinv)
       qwv=structure(double(nrow(qwd0)*ncol(sto)), dim=c(nrow(qwd0), ncol(sto)), dimnames=list(paste0("k", seq_len(nrow(qwd0))), colnames(sto)))
-      if (nb_sf > 0L) { # estimate scaling factors (sf)
-        f_resid=function(x, ...) with(list(...), {
+      # estimate scaling factors (sf) if asked
+      f_rbax=function(x, ...) {
+        mc=match.call()
+        with(list(...), {
           isf=seq_along(nmsf)
           nrc=lengths(dimnm)
-          if (length(x) == 0L) {
-            qwd0sf[,nmsf]=0.
-            c(double(length(nmsf)), tcrossprod(qwd0sf, stoinv))
-          } else {
-            qwv=structure(x[-isf], dim=nrc, dimnames=dimnm)
-            res=tcrossprod(qwv, sto)
-            qwd0sf[,nmsf]=mrowv(qwd0[,nmsf, drop=FALSE], x[isf])
-            res=qwd0sf-res
-            c(diag(pinv%*%res[,nmsf,drop=FALSE]), tcrossprod(res, stoinv))
-          }
-        })
-        f_BAx=function(x, ...) with(list(...), {
-          isf=seq_along(nmsf)
-          nrc=lengths(dimnm)
-          qwv=structure(x[-isf], dim=nrc, dimnames=dimnm)
+          qwv=structure(if (nb_sf) x[-isf] else x, dim=nrc, dimnames=dimnm)
           res=tcrossprod(qwv, sto)
-          qwd0sf[,nmsf]=mrowv(qwd0[,nmsf,drop=FALSE], x[isf])
-          res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
-          c(diag(pinv%*%res[,nmsf,drop=FALSE]), tcrossprod(res, stoinv))
+          qwd0sf[,nmsf]=mrowv(qwd0[,nmsf, drop=FALSE], x[isf])
+          if (mc[[1]] == "f_resid") {
+            res=qwd0sf-res
+          } else {
+            res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
+          }
+          c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stoinv))
         })
-        pinv=sinv(qwd0[,nmsf,drop=FALSE])
-
-        i_sf=match(nmsf, colnames(qwd0))
-        qwd0sf=qwd0
-        qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
-        # solve for x=(sf, qwv)
-        x=gmresls::gmresls(f_resid, f_BAx, nmsf=nmsf, dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0, qwd0sf=qwd0sf)
-        sf[]=x[seq_len(nb_sf)]
-        qwv[]=x[-seq_len(nb_sf)]
-        qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
-        environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
-        parm=bsppar(msp)
-        mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
       }
+      pinv=sinv(qwd0[,nmsf,drop=FALSE])
+      i_sf=match(nmsf, colnames(qwd0))
+      qwd0sf=qwd0
+      qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+      # solve for x=(sf, qwv)
+      x0=c(rep(1., nb_sf), tcrossprod(qwd0, stoinv))
+      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0, qwd0sf=qwd0sf)
+      sf[]=x[seq_len(nb_sf)]
+      qwv[]=if (nb_sf) x[-seq_len(nb_sf)] else x
+      qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+      environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
+      parm=bsppar(msp)
+      mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
 
       #print(c("sf=", sf, "; rss=", norm2(t(qwd0)-sto%*%t(qwv))))
       # find sd
@@ -712,12 +753,12 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       colnames(sdd0)=rownames(sto)
       sdd0[,colnames(sdd)]=sdd
       sit=t(stoinv)
-      sdfl=matrix(0., nrow=nrow(sdd0), ncol=nrate)
+      sdrate=structure(double(nrow(sdd0)*nrate), dim=c(nrow(sdd0), nrate), dimnames=list(NULL, colnames(sto)))
       for (i in seq_len(nrow(sdd))) {
         di=sdd0[i,]
         dsit=di*sit
         for (j in seq_len(ncol(sto)))
-          sdfl[i,j]=sqrt(dsit[,j]%*%dsit[,j])
+          sdrate[i,j]=sqrt(dsit[,j]%*%dsit[,j])
       }
     }
     })
@@ -726,7 +767,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   # rate splines
   vsp=bspline::par2bsp(nsp-1L, qwv, pard$xk)
   e=environment(vsp)
-  e$sdqw=sdfl # store sd
+  e$sdqw=sdrate # store sd
   # metab restored from S*v
   qwde=qwv%*%t(stofull) # dm/dt estimated from rates
   fsp=bspline::par2bsp(nsp-1L, qwde, pard$xk)
@@ -765,7 +806,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
   #browser()
 
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdfl, chi2tab=chi2tab, sf=sf)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab, sf=sf, x=x)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)
