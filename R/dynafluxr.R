@@ -731,7 +731,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
           c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stoinv))
         })
       }
-      pinv=sinv(qwd0[,nmsf,drop=FALSE])
+      pinv=if (nb_sf) sinv(qwd0[,nmsf,drop=FALSE]) else matrix(0., 0L, 0L)
       i_sf=match(nmsf, colnames(qwd0))
       qwd0sf=qwd0
       qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
