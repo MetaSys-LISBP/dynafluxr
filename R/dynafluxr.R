@@ -19,7 +19,15 @@ sinv=function(a, s=base::svd(a), tol=1.e-10) {
   dimnames(inv)=rev(dimnames(a))
   inv
 }
-
+#' Generalized inverse matrix based on QR
+#' @noRd
+#' @keywords internal
+qrinv=function(a, qa=base::qr(a, LAPACK=TRUE))
+  backsolve(qr.R(qa), t(qr.Q(qa)))[qa$pivot,,drop=FALSE]
+#' Replace NA by 0
+#' @noRd
+#' @keywords internal
+na.0=function(x) {x[is.na(x)]=0; x}
 
 #' Function to be called from shell command line
 #'
@@ -226,8 +234,18 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     dfmo=read.delim(opt$mono, comment.char="#")
     mono[dfmo[,1L]]=dfmo[,2L]
   }
-  mono[strsplit(opt$increasing, ",")[[1L]]]=1
-  mono[strsplit(opt$decreasing, ",")[[1L]]]=-1
+  v=strsplit(opt$increasing, ",")[[1L]]
+  if (any(ibad <- !(v %in% names(mono)))) {
+    vclose=sapply(v[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
+    stop("The following metabolites asked to be increasing, are not found in the network:\n\t", paste0(vclose, collapse="\n\t"))
+  }
+  mono[v]=1
+  v=strsplit(opt$decreasing, ",")[[1L]]
+  if (any(ibad <- !(v %in% names(mono)))) {
+    vclose=sapply(v[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
+    stop("The following metabolites asked to be decreasing, are not found in the network:\n\t", paste0(vclose, collapse="\n\t"))
+  }
+  mono[v]=-1
   # read atom lengths
   if (!is.null(opt$atom)) {
     datom=read.delim(opt$atom, comment.char="#")
@@ -247,13 +265,17 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     if (nchar(opt$nosf))
       stop("Both of '--sf' (", opt$sf, ") and '--nosf' (", opt$nosf, ") cannot be used simultaneously.")
     nmsf=sapply(strsplit(opt$sf, ",")[[1L]], trimws)
-    if (any(ibad <- !(nmsf %in% rownames(sto))))
-      stop("Following species were asked for scaling factors but are not present in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+    if (any(ibad <- !(nmsf %in% rownames(sto)))) {
+      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), ")"))
+      stop("Following species were asked for scaling factors but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
+    }
   }
   if (nchar(opt$nosf)) {
     nmsf=sapply(strsplit(opt$nosf, ",")[[1L]], trimws)
-    if (any(ibad <- !(nmsf %in% rownames(sto))))
-      stop("Following species were asked for NOT be used with scaling factors but are not present in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+    if (any(ibad <- !(nmsf %in% rownames(sto)))) {
+      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), ")"))
+      stop("Following species were asked for NOT be used with scaling factors but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
+    }
     nmsf=setdiff(rownames(sto), nmsf)
   }
   #print(c("opt=", opt))
@@ -478,7 +500,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{chi2tab:}{ data-frame with chi2-test results}
 #'   \item{sf:}{ named scale factor vector}
 #' }
-#' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
+#' @importFrom bspline smbsp dbsp bsppar par2bsp ibsp iknots
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
 #' @importFrom arrApply arrApply
 #' @importFrom stats var pchisq
@@ -497,22 +519,28 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   }
   # estimate var_ref with biggest d2 in variance (for chi2 test)
   nki_test=seq(max(0, nki-5), nki+5)
-  var_test=sapply(nki_test, function(k) {s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono, positive=1, lieq=lieq, estSD=FALSE); colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)})
+  var_test=sapply(nki_test, function(k) {
+    xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
+    s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono, positive=1, lieq=lieq, estSD=FALSE);
+    colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
+  })
   i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
   var_ref=stats::na.omit(var_test[,i_ref])
 
   # fit measurements
   err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono, positive=1, lieq=lieq, control=list(monotone=TRUE, errx=err_tp, trace=0), estSD=TRUE)
+  #xki=bspline::iknots(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lenfit=11L)
+  xki=seq(tp[1L], tp[np], length.out=nki+2L)[c(-1L, -(nki+2L))]
+  msp=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono, positive=1, lieq=lieq, estSD=TRUE)
+#browser()
   # remove metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
     #browser()
     ima=match(ina, rownames(stofull))
     ibad=which(is.na(ima))
-    if (length(ibad)) {
-      stop("Following names passed to --lna are not recognized: ", paste0(ina[ibad], collapse=", "))
-    }
+    if (length(ibad))
+      stop("Following names passed to --lna are not recognized: '", paste0(ina[ibad], collapse="', '"), "'")
     sto=stofull[-ima,,drop=FALSE]
     mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
     e=environment(msp)
@@ -531,14 +559,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   srank=sum(d > d[1L]*tol)
   if (srank < ncol(sto))
     stop("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", ncol(sto), ").")
+  stoinv=sinv(sto, s, tol)
   nmet=nrow(sto)
   nmetfull=nrow(stofull)
   nrate=ncol(sto)
-  nb_sf=length(nmsf)
-  sf=setNames(double(nb_sf), nmsf)
-  if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(stofull))))
-    stop("following species were asked with scaling factors but are not in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
-  stoinv=sinv(sto, s, tol)
   
   parm=bspline::bsppar(msp)
   nwm=nrow(parm$qw)
@@ -551,28 +575,41 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   qwd0=matrix(0., nrow(qwd), nmet)
   colnames(qwd0)=rownames(sto)
   qwd0[,colnames(qwd)]=qwd
+  
+  nb_sf=length(nmsf)
+  sf=setNames(rep(1., nb_sf), nmsf)
+  if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(stofull))))
+    stop("following species were asked with scaling factors but are not in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+  i_sf=match(nmsf, colnames(qwd0))
+  
   x=NULL
-
-  # calculates B-splines for reaction rates
+  # calculates B-splines coefs for reaction rates -> qwv
   if (!dls) {
     # build integral LS
     # qwm0: metab coeffs including 0s, it will be rhs
     qwm0=matrix(0., nrow=nwm, ncol=nmet)
     colnames(qwm0)=rownames(sto)
     qwm0[,colnames(parm$qw)]=parm$qw
+    qwm0sf=qwm0
     # unknowns: qwv and mstart
-    mstart=setNames(double(nmet), colnames(qwm0))
-    mstart[colnames(parm$qw)]=parm$qw[1,] # starting values where known
+    # starting values where known
+    mstart=setNames(na.0(parm$qw[1L,][colnames(qwm0)]), colnames(qwm0))
+    icnst=seq_len(nmet)
     # integration matrix (cumsum(...))
     ima=diag(nrow=nwm-1)
     ima=(row(ima)>=col(ima))+0.
     ima=rbind(0., mrowv(ima, diff(pard$xk, lag=nsp)/nsp))
-    # f2m: ima%*%qwv%*%t(sto)+rep(1,nkmet)%o%mstart
+    # differentiate matrix
+    dma=bspline::dmat(f=msp)
+    qwv=tcrossprod(qwd0, stoinv)
+    rownames(qwv)=paste0("k", seq_len(nrow(qwd0)))
+    # rate2metab: ima%*%qwv%*%t(sto)+rep(1,nkmet)%o%mstart ~> qwm0
     jqw=aperm(ima%o%t(sto), c(1L,4L,2L,3L))
     dim(jqw)=c(prod(dim(jqw)[1L:2L]), prod(dim(jqw)[3L:4L]))
     jadd=rep(1., nrow(ima))%o%diag(nrow=nmet)
     dim(jadd)=c(nrow(ima)*nmet, nmet)
     jtot=cbind(jadd, jqw)
+    resj=qwm0
     # inequalities: qwm >= 0; dm/dt monotone for some metabs
     if (any(monotone != 0)) {
       if (length(monotone) == 1L) {
@@ -606,16 +643,36 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       for (im in seq_len(nmet)) {
         ir=seq(nwm)+nwm*(im-1L)
         jtot[ir,]=isdy0[im]*(rcovqw0%*%jtot[ir,])
-        qwm0[,im]=isdy0[im]*(rcovqw0%*%qwm0[,im])
+        resj[,im]=isdy0[im]*(rcovqw0%*%resj[,im])
       }
     }
+    if (nb_sf) {
+      # prepend scaling factor to unknown vector
+      jsf=array(0., dim=c(dim(qwm0), nb_sf))
+      for (i in seq_len(nb_sf))
+        jsf[,i_sf[i],i]=-resj[,nmsf[i]]
+      jsf=matrix(jsf, prod(dim(resj)), nb_sf)
+      jtot0=jtot # to remove
+      jtot=cbind(jsf, jtot)
+      resj[,nmsf]=0.
+      u0=u
+      u=cbind(matrix(0., nrow(u), nb_sf), u)
+    }
     # solve ILS
-    st=system.time({p=nlsic::lsi(jtot, c(qwm0), u=u, co=co)})
+    colnames(jtot)=c(paste0("sf.", nmsf, recycle0=TRUE),
+      paste0("cnst.", rownames(sto)),
+      t(outer(colnames(qwv), seq_len(nwv), paste, sep=".")))
+    st=system.time({p=nlsic::lsi(jtot, c(resj), u=u, co=co)})
+    if (anyNA(p))
+      stop("Error in least squares with constraints:\n", attr(p, "mes"))
+    if (nb_sf) {
+      sf[]=p[seq_len(nb_sf)]
+      p=p[-seq_len(nb_sf)]
+    }
     # extract mst (metabolite starting values) and qwv
-    icnst=seq_len(nmet)
     mst=p[icnst]
     names(mst)=rownames(sto)
-    qwv=p[-icnst]
+    qwv[]=p[-icnst]
     dim(qwv)=c(nwv, nrate)
     colnames(qwv)=colnames(sto)
     # find sd
@@ -633,15 +690,16 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
         covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
       }
     }
-    jinv=sinv(jtot) # generalized inverse of jtot
+    jinv=qrinv(jtot) # generalized inverse of jtot
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
+    if (nb_sf)
+      sdp=sdp[-seq_len(nb_sf)]
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
     sdrate=sdp[-icnst]
     dim(sdrate)=c(nwv, nrate)
     colnames(sdrate)=colnames(sto)
   } else {
-#browser()
     # differential LS
     # generalized sto inverse
     # prepare chol factor of cov matrix (t(R)%*%R) for weighting
@@ -649,101 +707,57 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     dm=bspline::dmat(nrow(parm$qw), parm$xk, parm$n) # diff matrix
     covqwd=tcrossprod(dm%*%parm$covqw, dm)
     st=system.time({
+    x0=c(rep(1., nb_sf), tcrossprod(qwd0, stoinv))
+    f_rbax=function(x, ...) {
+      mc=match.call()
+      with(list(...), {
+        nrc=lengths(dimnm)
+        qwv=structure(if (nb_sf) x[-isf] else x, dim=nrc, dimnames=dimnm)
+        res=if (!is.null(rit)) rit%*%tcrossprod(qwv, sto) else tcrossprod(qwv, sto)
+        qwd0sf[,nmsf]=mrowv(qwd0[,nmsf, drop=FALSE], x[isf]) # qwd0sd
+        if (mc[[1L]] == "f_resid") {
+          res=qwd0sf-res
+        } else {
+          res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
+        }
+        # preconditioning
+        c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stoinv)) #stosdinv))
+      })
+    }
     if (wsd) {
       rcovqwd0=chol(covqwd)
       rcovqwd0i=backsolve(rcovqwd0, diag(ncol(rcovqwd0)), transpose=TRUE)
       isdy0=setNames(rep(1./mean(parm$sdy), nmet), rownames(sto))
       isdy0[names(parm$sdy)]=1./parm$sdy;
-      #jtot=aperm(diag(nrow(qwd0))%o%t(sto), c(1L,4L,2L,3L))
-      #dim(jtot)=c(prod(dim(jtot)[1L:2L]), prod(dim(jtot)[3L:4L]))
-      # weight qwd0 & jtot by rcov
       qwd0sd=structure(mrowv(rcovqwd0i%*%qwd0, isdy0), dimnames=list(paste0("k", seq_len(nrow(qwd0))), names(isdy0)))
-      #for (im in seq_len(nmet)) {
-      #  ir=seq(nwv)+nwv*(im-1L)
-      #  jtot[ir,]=isdy0[im]*(rcovqwd0i%*%jtot[ir,])
-      #}
-      # solve weighted dLS
-      #jinv=sinv(jtot, tol=tol)
-      #qwv=matrix(jinv%*%c(qwd0sd), nwv, ncol(sto))
       qwv=matrix(0., nwv, ncol(sto))
       dimnames(qwv)=list(paste0("k", seq_len(nrow(qwv))), colnames(sto))
       # gmresls
-      x0=c(rep(1., nb_sf), tcrossprod(qwd0, stoinv))
-      f_rbax=function(x, ...) {
-        mc=match.call()
-        with(list(...), {
-          isf=seq_along(nmsf)
-          nrc=lengths(dimnm)
-          qwv=structure(if (nb_sf) x[-isf] else x, dim=nrc, dimnames=dimnm)
-          res=rit%*%tcrossprod(qwv, stosd)
-          qwd0sf[,nmsf]=mrowv(qwd0sd[,nmsf, drop=FALSE], x[isf])
-          if (mc[[1]] == "f_resid") {
-            res=qwd0sf-res
-          } else {
-            res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
-          }
-          # preconditioning
-          c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stosdinv))
-        })
-      }
-      #pinv=if (nb_sf) sinv(qwd0[,nmsf,drop=FALSE]) else matrix(0, 0L, 0L)
-      pinv=if (nb_sf) t(qr.Q(qr((qwd0[,nmsf,drop=FALSE])))) else matrix(0, 0L, 0L)
-
-      i_sf=match(nmsf, colnames(qwd0))
+      pinv=if (nb_sf) t(qr.Q(qr((qwd0sd[,nmsf,drop=FALSE])))) else matrix(0, 0L, 0L)
       qwd0sf=qwd0sd
-      qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
       # solve for x=(sf, qwv)
       stosd=sto*isdy0
       qrs=qr(stosd)
       qt=t(qr.Q(qrs))
-      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, dimnm=dimnames(qwv), pinv=pinv, qwd0sd=qwd0sd, qwd0sf=qwd0sf, stosd=stosd, stosdinv=qt, rit=rcovqwd0i, r=rcovqwd0)
+      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, isf=seq_len(nb_sf), dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0sd, qwd0sf=qwd0sf, sto=stosd, stoinv=qt, rit=rcovqwd0i, r=rcovqwd0)
       sf[]=x[seq_len(nb_sf)]
       qwv[]=if (nb_sf) x[-seq_len(nb_sf)] else x
-      qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
-      environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
-      parm=bsppar(msp)
-      mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
 
       # find sd
-      #sdrate=sqrt(diag(tcrossprod(jinv)))
-      #dim(sdrate)=c(nwv, nrate)
-      #colnames(sdrate)=colnames(sto)
-      #sdrate=matrix(0., nrow=nrow(sdd0), ncol=nrate)
       sdrate=structure(sqrt(diag(covqwd))%o%sqrt(diag(tcrossprod(backsolve(qr.R(qrs), qt)))), dimnames=list(NULL, colnames(sto)))
     } else {
       # solve plain dLS
       #qwv=tcrossprod(qwd0, stoinv)
       qwv=structure(double(nrow(qwd0)*ncol(sto)), dim=c(nrow(qwd0), ncol(sto)), dimnames=list(paste0("k", seq_len(nrow(qwd0))), colnames(sto)))
       # estimate scaling factors (sf) if asked
-      f_rbax=function(x, ...) {
-        mc=match.call()
-        with(list(...), {
-          isf=seq_along(nmsf)
-          nrc=lengths(dimnm)
-          qwv=structure(if (nb_sf) x[-isf] else x, dim=nrc, dimnames=dimnm)
-          res=tcrossprod(qwv, sto)
-          qwd0sf[,nmsf]=mrowv(qwd0[,nmsf, drop=FALSE], x[isf])
-          if (mc[[1]] == "f_resid") {
-            res=qwd0sf-res
-          } else {
-            res[,nmsf]=res[,nmsf]-qwd0sf[,nmsf]
-          }
-          c(if (nb_sf) diag(pinv%*%res[,nmsf,drop=FALSE]) else NULL, tcrossprod(res, stoinv))
-        })
-      }
       pinv=if (nb_sf) sinv(qwd0[,nmsf,drop=FALSE]) else matrix(0., 0L, 0L)
       i_sf=match(nmsf, colnames(qwd0))
       qwd0sf=qwd0
       qwd0sf[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
       # solve for x=(sf, qwv)
-      x0=c(rep(1., nb_sf), tcrossprod(qwd0, stoinv))
-      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0, qwd0sf=qwd0sf)
+      x=gmresls::gmresls(f_rbax, f_rbax, x0=x0, nmsf=nmsf, nb_sf=nb_sf, isf=seq_len(nb_sf), dimnm=dimnames(qwv), pinv=pinv, qwd0=qwd0, qwd0sf=qwd0sf, sto=sto, stoinv=stoinv, rit=NULL)
       sf[]=x[seq_len(nb_sf)]
       qwv[]=if (nb_sf) x[-seq_len(nb_sf)] else x
-      qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
-      environment(msp)$qw[,nmsf]=mrowv(parm$qw[,nmsf,drop=FALSE], sf)
-      parm=bsppar(msp)
-      mf[,nmsf]=mrowv(as.matrix(mf[,nmsf,drop=FALSE]), sf)
 
       #print(c("sf=", sf, "; rss=", norm2(t(qwd0)-sto%*%t(qwv))))
       # find sd
@@ -762,6 +776,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       }
     }
     })
+  }
+  if (nb_sf) {
+    qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
+    i=nmsf %in% colnames(parm$qw)
+    environment(msp)$qw[,nmsf[i]]=mrowv(parm$qw[,nmsf[i],drop=FALSE], sf[i])
+    parm=bsppar(msp)
+    mf[,nmsf[i]]=mrowv(as.matrix(mf[,nmsf[i],drop=FALSE]), sf[i])
   }
   #print(st)
   # rate splines
