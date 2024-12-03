@@ -19,15 +19,36 @@ sinv=function(a, s=base::svd(a), tol=1.e-10) {
   dimnames(inv)=rev(dimnames(a))
   inv
 }
-#' Generalized inverse matrix based on QR
+#' Generalized inverse matrix based on svd for sd calculation
 #' @noRd
 #' @keywords internal
-qrinv=function(a, qa=base::qr(a, LAPACK=TRUE))
-  backsolve(qr.R(qa), t(qr.Q(qa)))[qa$pivot,,drop=FALSE]
+sinvsd=function(a, s=base::svd(a), tol=1.e-10) {
+  d=s$d
+  d[]=ifelse(d <= d[1L]*tol, d[1L]/tol, 1./d)
+  inv=tcrossprod(mrowv(s$v, d), s$u) # generalized inverse
+  dimnames(inv)=rev(dimnames(a))
+  inv
+}
+#' Generalized inverse of full-rank matrix (based on QR)
+#' @noRd
+#' @keywords internal
+qrinv=function(a, qa=base::qr(a, LAPACK=TRUE), tol=1.e-10) {
+  d=abs(diag(qa$qr))
+  irank=seq_len(sum(d >= d[1L]*tol))
+  backsolve(qr.R(qa)[irank, irank], t(qr.Q(qa)[,irank]))[qa$pivot[irank],,drop=FALSE]
+}
+#' Replace abs <= tol by 0
+#' @noRd
+#' @keywords internal
+tol0=function(x, tol=1.e-10) {x[abs(x) <= tol]=0; x}
 #' Replace NA by 0
 #' @noRd
 #' @keywords internal
 na.0=function(x) {x[is.na(x)]=0; x}
+#' Drop abs <= tol
+#' @noRd
+#' @keywords internal
+dr0=function(x, tol=1.e-10) {x[abs(x) >= tol]}
 
 #' Function to be called from shell command line
 #'
@@ -158,7 +179,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
         help="use Differential Least Squares formulation (default: FALSE)"
       ),
       make_option(c("--wsd"), action="store_true", default=FALSE,
-        help="weight Integral Least Squares by square root of covariance matrix (default: FALSE)"
+        help="weight Least Squares by square root of covariance matrix (default: FALSE). Not compatible with under-detremined stoichiometric matrix, i.e. when there are no sufficient specie dynamics measurements."
       ),
       make_option(c("--npi"), type="integer", default=300, help=
         "Number of plot intervals for smooth curve plotting
@@ -551,19 +572,21 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   } else {
     sto=stofull
   }
-  if (nrow(sto) < ncol(sto))
-    stop("Number of species in stoichiometric matrix (", nrow(sto), ") is lower than reaction number (", ncol(sto), ").")
+  nrate=ncol(sto)
+  nmet=nrow(sto)
+  nmetfull=nrow(stofull)
+  #if (nmet < nrate)
+  #  stop("Number of species in stoichiometric matrix (", nrow(sto), ") is lower than reaction number (", ncol(sto), ").")
   # check rank and make stoinv
   s=svd(sto)
   d=s$d
   srank=sum(d > d[1L]*tol)
-  if (srank < ncol(sto))
-    stop("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", ncol(sto), ").")
-  stoinv=sinv(sto, s, tol)
-  nmet=nrow(sto)
-  nmetfull=nrow(stofull)
-  nrate=ncol(sto)
-  
+#browser()
+  if (srank < nrate)
+    # minimal norm solution
+    warning("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", nrate, ").\nThe solution of minimal norm will be provided.")
+  stoinv=sinv(sto, s, tol=tol)
+  stoinvsd=sinvsd(sto, s, tol=tol)
   parm=bspline::bsppar(msp)
   nwm=nrow(parm$qw)
   # first derivatives
@@ -585,7 +608,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   x=NULL
   # calculates B-splines coefs for reaction rates -> qwv
   if (!dls) {
-    # build integral LS
+    # build Integral LS
     # qwm0: metab coeffs including 0s, it will be rhs
     qwm0=matrix(0., nrow=nwm, ncol=nmet)
     colnames(qwm0)=rownames(sto)
@@ -635,6 +658,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
 #browser()
     # prepare chol factor of cov matrix (t(R)%*%R) for weighting
     if (wsd) {
+      if (srank < nrate)
+        stop("Option '--wsd' is not compatible with under-determined stoichiometric matrix")
       rcovqw0=chol(parm$covqw)
       rcovqw0=t(backsolve(rcovqw0, diag(ncol(rcovqw0))))
       isdy0=structure(rep(1./mean(parm$sdy), nmet), names=rownames(sto))
@@ -662,7 +687,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     colnames(jtot)=c(paste0("sf.", nmsf, recycle0=TRUE),
       paste0("cnst.", rownames(sto)),
       t(outer(colnames(qwv), seq_len(nwv), paste, sep=".")))
-    st=system.time({p=nlsic::lsi(jtot, c(resj), u=u, co=co)})
+#browser()
+    st=system.time({p=nlsic::lsi_ln(jtot, c(resj), u=u, co=co)})
     if (anyNA(p))
       stop("Error in least squares with constraints:\n", attr(p, "mes"))
     if (nb_sf) {
@@ -690,7 +716,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
         covm0[i,i]=parm$covqw*(parm$sdy[m]**2)
       }
     }
-    jinv=qrinv(jtot) # generalized inverse of jtot
+    jinv=sinvsd(jtot) # generalized inverse of jtot for sd
+#browser()
     sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
     if (nb_sf)
       sdp=sdp[-seq_len(nb_sf)]
@@ -725,6 +752,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       })
     }
     if (wsd) {
+      if (srank < nrate)
+        stop("Option '--wsd' is not compatible with under-determined stoichiometric matrix")
       rcovqwd0=chol(covqwd)
       rcovqwd0i=backsolve(rcovqwd0, diag(ncol(rcovqwd0)), transpose=TRUE)
       isdy0=setNames(rep(1./mean(parm$sdy), nmet), rownames(sto))
@@ -766,7 +795,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
       sdd0=matrix(0., nrow=nrow(sdd), ncol=nmet)
       colnames(sdd0)=rownames(sto)
       sdd0[,colnames(sdd)]=sdd
-      sit=t(stoinv)
+      sit=t(stoinvsd)
       sdrate=structure(double(nrow(sdd0)*nrate), dim=c(nrow(sdd0), nrate), dimnames=list(NULL, colnames(sto)))
       for (i in seq_len(nrow(sdd))) {
         di=sdd0[i,]
@@ -827,7 +856,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
   #browser()
 
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab, sf=sf, x=x)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab, sf=sf)
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)

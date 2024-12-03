@@ -1,3 +1,7 @@
+## v0.18.0 2024-12-03
+
+- added minimal norm for under-determined stoichiometric matrix
+
 ## v0.17.0 2024-10-28
 
 - added --sf to ILS
