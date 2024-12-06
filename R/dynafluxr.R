@@ -181,7 +181,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       make_option(c("--wsd"), action="store_true", default=FALSE,
         help="weight Least Squares by square root of covariance matrix (default: FALSE). Not compatible with under-detremined stoichiometric matrix, i.e. when there are no sufficient specie dynamics measurements."
       ),
-      make_option(c("--npi"), type="integer", default=300, help=
+      make_option(c("--npi"), type="integer", default=300L, help=
         "Number of plot intervals for smooth curve plotting
     [default %default]"
       ),
@@ -192,6 +192,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       make_option(c("--nosf"), type="character", default="", help=
         "Names of species separated by comma ',' for which scailng factors must NOT be estimated but they are estimated for all others. This option cannot be used simultaneously with '--sf'.
     [default %default]"
+      ),
+      make_option(c("--sderr"), type="character", default="", help=
+        "Couples of species and experimental error SD separated by comma ',' e.g. 'GLC=0.01,F6P=0.02'"
       ),
       make_option(c("--fsd"), type="double", default=2., help=
         "SD factor for plotting gray band \u00b1fsd*SD around spline curves. Use '--fsd=0' to cancel these bands. [default %default]"
@@ -257,13 +260,13 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   v=strsplit(opt$increasing, ",")[[1L]]
   if (any(ibad <- !(v %in% names(mono)))) {
-    vclose=sapply(v[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
+    vclose=sapply(v[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
     stop("The following metabolites asked to be increasing, are not found in the network:\n\t", paste0(vclose, collapse="\n\t"))
   }
   mono[v]=1
   v=strsplit(opt$decreasing, ",")[[1L]]
   if (any(ibad <- !(v %in% names(mono)))) {
-    vclose=sapply(v[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
+    vclose=sapply(v[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=names(mono), value=TRUE), collapse=", "), ")"))
     stop("The following metabolites asked to be decreasing, are not found in the network:\n\t", paste0(vclose, collapse="\n\t"))
   }
   mono[v]=-1
@@ -276,31 +279,59 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     atomlen=NULL
   }
   # prepare NA list from --lna
-  lna=strsplit(opt$lna, ",")[[1L]]
-  if (length(lna) > 0L) {
-    mf[,lna]=rep(NA, nrow(mf))
+  lna=unique(sapply(strsplit(opt$lna, ",")[[1L]], trimws))
+  if (any(ibad <- !(lna %in% rownames(sto)))) {
+    vclose=sapply(lna[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), "?)"))
+    stop("Following species were labeled as NA but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
   }
+  if (length(lna) > 0L)
+    mf[,lna]=rep(NA, nrow(mf))
+ 
   # prepare nmsf vector from --sf or --nosf
   nmsf=character(0L)
   if (nchar(opt$sf)) {
     if (nchar(opt$nosf))
       stop("Both of '--sf' (", opt$sf, ") and '--nosf' (", opt$nosf, ") cannot be used simultaneously.")
-    nmsf=sapply(strsplit(opt$sf, ",")[[1L]], trimws)
+    nmsf=unique(sapply(strsplit(opt$sf, ",")[[1L]], trimws))
     if (any(ibad <- !(nmsf %in% rownames(sto)))) {
-      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), ")"))
+      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), "?)"))
       stop("Following species were asked for scaling factors but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
     }
   }
   if (nchar(opt$nosf)) {
-    nmsf=sapply(strsplit(opt$nosf, ",")[[1L]], trimws)
+    nmsf=unique(sapply(strsplit(opt$nosf, ",")[[1L]], trimws))
     if (any(ibad <- !(nmsf %in% rownames(sto)))) {
-      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (close to: ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), ")"))
+      vclose=sapply(nmsf[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), "?)"))
       stop("Following species were asked for NOT be used with scaling factors but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
     }
     nmsf=setdiff(rownames(sto), nmsf)
   }
+  nmsf=setdiff(nmsf, lna)
+  if (all(rownames(sto) %in% c(nmsf, lna)))
+    stop("Scaling factors are requested for all available species which is meaningless. At least one specie must be excluded from --sf list")
   #print(c("opt=", opt))
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf)
+  
+  # prepare sderr
+  sderr=double(0L)
+  if (nchar(opt$sderr)) {
+    sdtmp=sapply(strsplit(opt$sderr, ",")[[1L]], trimws)
+    sdtmp=lapply(strsplit(sdtmp, "="), trimws)
+    if (any(lengths(sdtmp) != 2L))
+      stop("Badly formatted --sdref '", opt$sderr, "'. Expecting couples 'SPECIE1=VALUE1,...,SPECIEN=VALUEN'")
+    sderr=setNames(sapply(sdtmp, `[[`, 2L), sapply(sdtmp, `[[`, 1L))
+    suppressWarnings(storage.mode(sderr) <- "double")
+    if (anyNA(sderr))
+      stop("A value could not be converted to real number in --sdref '", opt$sderr, "'. Expecting couples 'SPECIE1=VALUE1,...,SPECIEN=VALUEN'")
+    if (any(ibad <- !(names(sderr) %in% rownames(sto)))) {
+      vclose=sapply(names(sderr)[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), "?)"))
+      stop("Following species were assigned error SD in '", opt$sderr, "' but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
+    }
+    if (any(names(sderr) %in% lna))
+      sderr=sderr[!names(sderr) %in% lna]
+  }
+  
+  # main call
+  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr)
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -426,6 +457,14 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     write.table(res$chi2tab, file=file.path(rd, "stats.tsv"), sep="\t", quote=FALSE, col.names=NA)
     # Readme.md
 #browser()
+    if (length(nmsf)) {
+      cat(file=file.path(rd, "sf.tsv"), sep="",
+        "Specie\tValue\n")
+      write.table(as.matrix(res$sf), file=file.path(rd, "sf.tsv"), append=TRUE, sep="\t", quote=FALSE, col.names=FALSE)
+    } else {
+      unlink(file.path(rd, "sf.tsv"))
+    }
+    
     cat(file=file.path(rd, "Readme.md"), sep="\n",
       "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
       paste0("This is the result files produced by dynafluxr R package (v", utils::packageVersion("dynafluxr"), ") on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
@@ -444,7 +483,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       " - `flux.tsv`: flux table;",
       " - `stats.tsv`: table with chi2 tests per compound;",
       paste0(" - `env.RData`: stored R list `res` such as returned by `dynafluxr::fdyn()`. It can be read in R session with `e=new.env(); load('", file.path(rd, "env.RData"), "', envir=e)` and then used to retrieve e.g. integrated compounds as `icmpnd=e$res$isp(e$res$tpp)`;"),
-      " - `Readme.md`: this file;"
+      " - `Readme.md`: this file;",
+      if (length(nmsf)) " - `sf.tsv`: estimated scaling factors;" else ""
     )
     # zip files
     if (opt$zip) {
@@ -527,17 +567,13 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
 #' @export
-fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), tol=1.e-10) {
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10) {
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
   tpp=seq(tp[1L], tp[np], length.out=npi+1L)
   # prepare mono
-  if (length(monotone) > 1L) {
-    mono=monotone[colnames(mf)[-1L]]
-  } else {
-    mono=monotone
-  }
+  mono=if (length(monotone) > 1L) monotone[colnames(mf)[-1L]] else monotone
   # estimate var_ref with biggest d2 in variance (for chi2 test)
   nki_test=seq(max(0, nki-5), nki+5)
   var_test=sapply(nki_test, function(k) {
@@ -547,6 +583,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   })
   i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
   var_ref=stats::na.omit(var_test[,i_ref])
+  var_ref[names(sderr)]=sderr**2L
+#browser()
 
   # fit measurements
   err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
@@ -582,9 +620,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   d=s$d
   srank=sum(d > d[1L]*tol)
 #browser()
-  if (srank < nrate)
+  if (srank < nrate) {
     # minimal norm solution
-    warning("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", nrate, ").\nThe solution of minimal norm will be provided.")
+    qs=qr(sto, LAPACK=TRUE)
+    warning("Stoichiometric matrix rank (", srank, ") is lower than reaction number (", nrate, ").\n",
+      "The solution of minimal norm will be provided.\n",
+      "Undefined rates could be, for example:\n\t", paste0(colnames(sto)[tail(qs$pivot, -srank)], collapse="\n\t"))
+  }
   stoinv=sinv(sto, s, tol=tol)
   stoinvsd=sinvsd(sto, s, tol=tol)
   parm=bspline::bsppar(msp)
@@ -847,16 +889,22 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   colnames(qw0)=colnames(pari$qw)
   qw0[,colnames(parm$qw)]=parm$qw
   risp=bspline::par2bsp(nsp, qw0-pari$qw, parm$xk)
-  #browser()
+#browser()
   # chi2 test
   rss=colSums(as.matrix(mf[,-1L]-isp(mf$Time, colnames(mf)[-1L]))**2, na.rm=TRUE)
+  rss=c(rss, Total=sum(rss))
+  var_ref=c(var_ref, Total=sum(var_ref))
   chi2=rss/var_ref
+  chi2[length(chi2)]=sum(head(chi2, -1L))
   df=colSums(!is.na(mf[,-1L]))-(if(dls) nrow(qwv) else nwm)
+  df=c(df, Total=sum(df))
   pval=stats::pchisq(chi2, df=df, lower=FALSE)
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
-  #browser()
+#browser()
 
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp, fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab, sf=sf)
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp,
+    fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab,
+    sf=sf, internal_knot_ref=nki_test[i_ref])
   # atom balance
   if (length(atomlen)) {
     asp=bspline::par2bsp(nsp, colSums(t(parm$qw)*atomlen[colnames(parm$qw)]), parm$xk)
