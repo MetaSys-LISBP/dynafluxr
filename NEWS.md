@@ -1,3 +1,14 @@
+## v0.20.0 2025-01-17
+- all NA species are now removed from stoichiometrique matrix
+- curvature of L-curve is used for ref knot number
+- sf is now applied to var_ref too.
+- point character is now "." instead of "o"
+- line width is set to 1.5 instead of 1
+- stricter separation of monotonicity for preliminary fit and sto fit
+- NA in fits gives an error now
+- added stoinv to res
+- stricter control of negative coefficients in B-splines
+
 ## v0.19.0 2024-12-06
 - sf in file
 - sf for all => error

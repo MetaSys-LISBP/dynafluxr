@@ -24,7 +24,7 @@ sinv=function(a, s=base::svd(a), tol=1.e-10) {
 #' @keywords internal
 sinvsd=function(a, s=base::svd(a), tol=1.e-10) {
   d=s$d
-  d[]=ifelse(d <= d[1L]*tol, d[1L]/tol, 1./d)
+  d[]=ifelse(d <= d[1L]*tol, 1./(d[1L]*tol), 1./d)
   inv=tcrossprod(mrowv(s$v, d), s$u) # generalized inverse
   dimnames(inv)=rev(dimnames(a))
   inv
@@ -71,7 +71,7 @@ dr0=function(x, tol=1.e-10) {x[abs(x) >= tol]}
 #'   tpp=res$tpp
 #'   # plot species
 #'   matplot(tpp, res$msp(tpp), type="l")
-#'   matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
+#'   matpoints(tp, res$mf[,-1], pch=".", cex=0.5)
 #'   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6, cex=0.75)
 #'   # plot rates
 #'   dev.new()
@@ -80,7 +80,7 @@ dr0=function(x, tol=1.e-10) {x[abs(x) >= tol]}
 #'   tf=as.numeric(rownames(ref)) # reference rate time points
 #'   nm_rate=colnames(bsppar(res$vsp)$qw)
 #'   itf=(tf >= min(tp) & tf <= max(tp))
-#'   matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch="o", cex=0.5)
+#'   matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch=".", cex=0.5)
 #'   legend("topright", legend=nm_rate, lty=1:5, col=1:6, cex=0.75)
 #'   # plot residuals
 #'   dev.new()
@@ -366,7 +366,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       plot(1, xlim=ratp, main=main, ylim=ylim, xlab="Time", ylab=ylab, t="n")
       matlines(tpp, mc)
       if (!is.null(data))
-        matpoints(tp, data, pch="o", cex=0.5)
+        matpoints(tp, data, pch=".", cex=0.5)
       legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6, bg=rgb(1,1,1,0.3), cex=0.75)
       # multi-color sd-bands
       if (!is.null(p$sdqw)) {
@@ -396,12 +396,12 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
           ylim=range(ylim, msdp[,m], msdm[,m])
         plot(1, main=m, xlab="Time", ylab=ylab, xlim=ratp, ylim=ylim, type="n")
         if (!is.null(d))
-          points(tp, d, pch="o", cex=0.5)
-        lines(tpp, mc[,m])
+          points(tp, d, pch=".", cex=0.5)
+        lines(tpp, mc[,m], lwd=1.5)
         if (!is.null(p$sdqw))
           polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
         if (!is.null(sto)) {
-          matlines(tpp, fl, lty=c(2:5,1), col=c(2:6,1))
+          matlines(tpp, fl, lty=c(2:5,1), col=c(2:6,1), lwd=1.5)
           legend("topright", legend=c("Total", nm_re), lty=1:5, col=1:6)
         }
       }
@@ -417,9 +417,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       datom=colSums(t(res$mf[,-1L])*atomlen[colnames(res$mf)[-1L]], na.rm=TRUE)
       ac=res$asp(tpp)
       iac=res$iasp(tpp)
-      plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE), xlab="Time", ylab="Total atom number", t="n")
-      matlines(tpp, cbind(ac, iac))
-      points(tp, datom, pch="o", cex=0.5)
+      plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE),
+        xlab="Time", ylab="Total atom number", t="n", lwd=1.5)
+      matlines(tpp, cbind(ac, iac), lwd=1.5)
+      points(tp, datom, pch=".", cex=0.5)
       legend("topright", legend=c("fitted species", "integrated species"), bg=rgb(1,1,1,0.3), lty=1:2, col=1:2, cex=0.75)
       dev.off()
       atomline=" - `atom.pdf`: atom balance plots;"
@@ -545,7 +546,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{tp:}{ vector of time points for used measurements}
 #'   \item{tpp:}{ vector of time points for plot (fine time resolution)}
 #'   \item{sto:}{ stoichiometric matrix used for fitting}
-#'   \item{invsto:}{ pseudo-inverse of stoichiometric matrix used in DSL (NULL for ISL)}
+#'   \item{stofull:}{ stoichiometric matrix before a possible NA elimination}
+#'   \item{stoinv:}{ pseudo-inverse of sto}
 #'   \item{msp:}{ measured specie spline function}
 #'   \item{vsp:}{ estimated rates spline function}
 #'   \item{fsp:}{ estimated total flux (S*v) spline function}
@@ -560,6 +562,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
 #'   \item{chi2tab:}{ data-frame with chi2-test results}
 #'   \item{sf:}{ named scale factor vector}
+#'   \item{internal_knot_ref:}{ number of internal knots used for estimation of var_ref}
 #' }
 #' @importFrom bspline smbsp dbsp bsppar par2bsp ibsp iknots
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
@@ -567,22 +570,31 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
 #' @export
-fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10) {
+fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
+    atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10) {
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
   tpp=seq(tp[1L], tp[np], length.out=npi+1L)
-  # prepare mono
-  mono=if (length(monotone) > 1L) monotone[colnames(mf)[-1L]] else monotone
+  # eliminate all NA columns from mf
+  icna=apply(mf, 2L, function(v) all(is.na(v)))
+  mf=mf[,!icna, drop=FALSE]
+  # prepare mono_mf
+  mono_mf=if (length(monotone) > 1L) monotone[colnames(mf)[-1L]] else monotone
+#browser()
   # estimate var_ref with biggest d2 in variance (for chi2 test)
   nki_test=seq(max(0, nki-5), nki+5)
   var_test=sapply(nki_test, function(k) {
     xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
-    s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono, positive=1, lieq=lieq, estSD=FALSE);
-    colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
+    s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, lieq=lieq, estSD=FALSE);
+    if (anyNA(bspline::bsppar(s)$qw))
+      stop("NA appeared in preliminary spline fits")
+    base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
   })
-  i_ref=which.max(base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L))+1L
-  var_ref=stats::na.omit(var_test[,i_ref])
+  # detect maximal curvature -> ku=2*d2/(1+d1^2)^1.5
+  ku=2.*base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L)/(1.+(base::diff(base::colSums(var_test, na.rm=TRUE), difference=1L, lag=2L)*0.5)^2L)^1.5
+  i_ref=which.max(ku)+1L
+  var_ref=var_test[,i_ref]
   var_ref[names(sderr)]=sderr**2L
 #browser()
 
@@ -590,26 +602,27 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
   #xki=bspline::iknots(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lenfit=11L)
   xki=seq(tp[1L], tp[np], length.out=nki+2L)[c(-1L, -(nki+2L))]
-  msp=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono, positive=1, lieq=lieq, estSD=TRUE)
+  msp=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, lieq=lieq, estSD=TRUE)
 #browser()
-  # remove metab's NA
+  # error on metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
   if (length(ina)) {
     #browser()
-    ima=match(ina, rownames(stofull))
-    ibad=which(is.na(ima))
-    if (length(ibad))
-      stop("Following names passed to --lna are not recognized: '", paste0(ina[ibad], collapse="', '"), "'")
-    sto=stofull[-ima,,drop=FALSE]
-    mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
-    e=environment(msp)
-    ibad=match(ina, colnames(e$qw))
-    e$qw=e$qw[,-ibad,drop=FALSE]
-    e$sdy=e$sdy[-ibad]
-    e$sdqw=e$sdqw[,-ibad,drop=FALSE]
-  } else {
-    sto=stofull
+    stop("Following species could not be fitted: '", paste0(ina, collapse="', '"), "'")
+#    ima=match(ina, rownames(stofull))
+#    ibad=which(is.na(ima))
+#    if (length(ibad))
+#      stop("Following names passed to --lna are not recognized: '", paste0(ina[ibad], collapse="', '"), "'")
+#    sto=stofull[-ima,,drop=FALSE]
+#    mf=mf[,-match(ina, colnames(mf)),drop=FALSE]
+#    e=environment(msp)
+#    ibad=match(ina, colnames(e$qw))
+#    e$qw=e$qw[,-ibad,drop=FALSE]
+#    e$sdy=e$sdy[-ibad]
+#    e$sdqw=e$sdqw[,-ibad,drop=FALSE]
   }
+  # keep only valid metab in sto
+  sto=stofull[intersect(rownames(stofull), colnames(mf)[-1L]),,drop=FALSE]
   nrate=ncol(sto)
   nmet=nrow(sto)
   nmetfull=nrow(stofull)
@@ -846,7 +859,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
           sdrate[i,j]=sqrt(dsit[,j]%*%dsit[,j])
       }
     }
-    })
+    }) # system.time()
   }
   if (nb_sf) {
     qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
@@ -854,6 +867,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
     environment(msp)$qw[,nmsf[i]]=mrowv(parm$qw[,nmsf[i],drop=FALSE], sf[i])
     parm=bsppar(msp)
     mf[,nmsf[i]]=mrowv(as.matrix(mf[,nmsf[i],drop=FALSE]), sf[i])
+    var_ref[nmsf]=var_ref[nmsf]*(sf^2L)
   }
   #print(st)
   # rate splines
@@ -864,6 +878,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   qwde=qwv%*%t(stofull) # dm/dt estimated from rates
   fsp=bspline::par2bsp(nsp-1L, qwde, pard$xk)
   const=setNames(double(nmetfull), colnames(qwde))
+#browser()
   if (!dls) {
     const[names(mst)]=mst
     #browser()
@@ -876,11 +891,12 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   }
   isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
-  if ((dls || length(ina) > 0) && any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
+#browser()
+  if (any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
     e=environment(isp)
-    #browser()
     ineg=names(ineg[ineg])
     e$qw[,ineg]=arrApply::arrApply(e$qw[,ineg,drop=FALSE], 2, "addv", v=-imin[ineg])
+    pari=bspline::bsppar(isp)
   }
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
@@ -902,7 +918,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE, ato
   chi2tab=data.frame(rss=rss, var_ref=var_ref, df=df, chi2=chi2, pval=pval)
 #browser()
 
-  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, msp=msp, vsp=vsp,
+  res=list(mf=mf, tp=tp, tpp=tpp, sto=sto, stofull=stofull, stoinv=stoinv, msp=msp, vsp=vsp,
     fsp=fsp, dsp=dsp, isp=isp, rsp=rsp, risp=risp, sdrate=sdrate, chi2tab=chi2tab,
     sf=sf, internal_knot_ref=nki_test[i_ref])
   # atom balance

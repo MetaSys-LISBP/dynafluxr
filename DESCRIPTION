@@ -2,7 +2,7 @@ Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of
         Specie Concentrations
-Version: 0.19.0
+Version: 0.20.0
 Author: Serguei Sokol <sokol@insa-toulouse.fr>
 Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
 Description: Reaction rate dynamics can be retrieved from time-series measurements
@@ -10,12 +10,12 @@ Description: Reaction rate dynamics can be retrieved from time-series measuremen
   corresponding stoechiometric
   matrix but not a regulation model (Michaelis-Menten or similar).
   Instead of solving an ODE system describing the evolution of concentrations,
-  we use B-splines to catch the concentration and rate dynamics then solve a least square problem
-  on their coefficients with optional constraints. Constraints can be set
-  on initial values of concentration and/or monotonicity of B-spline coefficients.
-  Positivity of these coefficients is always enforced.
-  The package 'dynafluxr' can be used as a library providing appropriate functions but also as
-  a stand alone application with command line interface.
+  we use B-splines to catch the concentration and rate dynamics then
+  solve a least square problem on their coefficients with positivity
+  (and optionaly monotonicity) constraints.
+  Constraints can be also set on initial values of concentration.
+  The package 'dynafluxr' can be used as a library but also as
+  an application with command line interface.
 License: GPL-2
 Encoding: UTF-8
 Depends: bspline, nlsic
@@ -30,5 +30,3 @@ RoxygenNote: 7.3.2
 Suggests: RUnit, knitr, rmarkdown
 VignetteBuilder: knitr
 NeedsCompilation: no
-#Remotes: 
-#    url::https://forgemia.inra.fr/mathscell/gmresls.git
