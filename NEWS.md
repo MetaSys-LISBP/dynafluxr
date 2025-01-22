@@ -1,3 +1,11 @@
+## v0.21.0 2025-01-22
+- added constraints by value at given time points for ILS
+- added option "--pch", default to "."
+- added nm_lapply()
+- added res$mffull
+- curvature of L-curve is measured on log-values
+- fixed error message for non measured metabs but asked with scaling factors
+
 ## v0.20.0 2025-01-17
 - all NA species are now removed from stoichiometrique matrix
 - curvature of L-curve is used for ref knot number

@@ -49,6 +49,14 @@ na.0=function(x) {x[is.na(x)]=0; x}
 #' @noRd
 #' @keywords internal
 dr0=function(x, tol=1.e-10) {x[abs(x) >= tol]}
+#' Iterate on name and item in named list
+#' @noRd
+#' @keywords internal
+nm_lapply=function(X, FUN, ...) {
+  nms=names(X)
+  stopifnot(length(nms) == length(X))
+  setNames(lapply(seq_along(X), function(i) FUN(nms[i], X[[i]], ...)), nms)
+}
 
 #' Function to be called from shell command line
 #'
@@ -198,6 +206,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       ),
       make_option(c("--fsd"), type="double", default=2., help=
         "SD factor for plotting gray band \u00b1fsd*SD around spline curves. Use '--fsd=0' to cancel these bands. [default %default]"
+      ),
+      make_option(c("--pch"), type="character", default=".", help=
+        "Plotting character for dots. [default %default]"
       )
     )
   }
@@ -242,8 +253,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   mf=cbind(Time=mf[,iti], mf[, intersect(colnames(mf)[-iti], rownames(sto))])
   if (ncol(mf) == 1L)
     stop(sprintf("No valid specie names in '%s'", opt$meas))
+  ikeep=rep(TRUE, nrow(mf))
   if (opt$skip > 0L)
-    mf=mf[-seq_len(opt$skip),]
+    ikeep[seq_len(opt$skip)]=FALSE
   # read equality constraints
   if (!is.null(opt$constr)) {
     dfeq=read.delim(opt$constr, comment.char="#")
@@ -284,8 +296,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     vclose=sapply(lna[ibad], function(val) paste0(val, " (did you mean ", paste0(agrep(val, x=rownames(sto), value=TRUE), collapse=", "), "?)"))
     stop("Following species were labeled as NA but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
   }
-  if (length(lna) > 0L)
-    mf[,lna]=rep(NA, nrow(mf))
+  ina=colnames(mf) %in% lna
  
   # prepare nmsf vector from --sf or --nosf
   nmsf=character(0L)
@@ -331,7 +342,8 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   
   # main call
-  res=fdyn(mf, sto, nsp=opt$norder, nki=opt$knot, lieq=lieq, monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr)
+  res=fdyn(mf[ikeep,!ina], sto, nsp=opt$norder, nki=opt$knot, lieq=lieq[setdiff(names(lieq), lna)], monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr)
+  res$mffull=mf
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -350,7 +362,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     tppr=c(tpp, rev(tpp)) # for SD band plotting
     bcol=do.call(rgb, as.list(c(col2rgb(1)/255, 0.3))) # band color
     # define plot function
-    plotsp=function(fname, sp, main, ylab, data=NULL, sto=NULL) {
+    plotsp=function(fname, sp, main, ylab, data=NULL, sto=NULL, pch=opt$pch) {
       # plot splines with sd-band and data
       open_here=!is.null(fname)
       if (open_here)
@@ -366,7 +378,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       plot(1, xlim=ratp, main=main, ylim=ylim, xlab="Time", ylab=ylab, t="n")
       matlines(tpp, mc)
       if (!is.null(data))
-        matpoints(tp, data, pch=".", cex=0.5)
+        matpoints(tp, data, pch=pch, cex=0.5)
       legend("topright", legend=colnames(p$qw), lty=1:5, col=1:6, bg=rgb(1,1,1,0.3), cex=0.75)
       # multi-color sd-bands
       if (!is.null(p$sdqw)) {
@@ -396,7 +408,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
           ylim=range(ylim, msdp[,m], msdm[,m])
         plot(1, main=m, xlab="Time", ylab=ylab, xlim=ratp, ylim=ylim, type="n")
         if (!is.null(d))
-          points(tp, d, pch=".", cex=0.5)
+          points(tp, d, pch=pch, cex=0.5)
         lines(tpp, mc[,m], lwd=1.5)
         if (!is.null(p$sdqw))
           polygon(tppr, c(msdp[,m], rev(msdm[,m])), border=NA, col=bcol)
@@ -420,7 +432,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       plot(1, xlim=ratp, main="Atom balance evolution", ylim=range(ac, iac, datom, na.rm=TRUE),
         xlab="Time", ylab="Total atom number", t="n", lwd=1.5)
       matlines(tpp, cbind(ac, iac), lwd=1.5)
-      points(tp, datom, pch=".", cex=0.5)
+      points(tp, datom, pch=opt$pch, cex=0.5)
       legend("topright", legend=c("fitted species", "integrated species"), bg=rgb(1,1,1,0.3), lty=1:2, col=1:2, cex=0.75)
       dev.off()
       atomline=" - `atom.pdf`: atom balance plots;"
@@ -436,7 +448,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #browser()
     grDevices::cairo_pdf(file.path(rd, "imet%03d.pdf"))
     inames=colnames(bspline::bsppar(res$isp)$qw)
-    tmp=matrix(NA_real_, nrow(mf), length(inames)) # inject here mf values
+    tmp=matrix(NA_real_, nrow(mf[ikeep,,drop=FALSE]), length(inames)) # inject here mf values
     colnames(tmp)=inames
     cnm=intersect(inames, colnames(res$mf)[-1L]) # NA columns in mf are absent in mc
     tmp[,cnm]=as.matrix(res$mf[,cnm])
@@ -592,7 +604,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
   })
   # detect maximal curvature -> ku=2*d2/(1+d1^2)^1.5
-  ku=2.*base::diff(base::colSums(var_test, na.rm=TRUE), difference=2L)/(1.+(base::diff(base::colSums(var_test, na.rm=TRUE), difference=1L, lag=2L)*0.5)^2L)^1.5
+  ly=log(base::colSums(var_test, na.rm=TRUE))
+  ku=2.*base::diff(ly, difference=2L)/(1.+(base::diff(ly, difference=1L, lag=2L)*0.5)^2L)^1.5
   i_ref=which.max(ku)+1L
   var_ref=var_test[,i_ref]
   var_ref[names(sderr)]=sderr**2L
@@ -644,6 +657,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   stoinvsd=sinvsd(sto, s, tol=tol)
   parm=bspline::bsppar(msp)
   nwm=nrow(parm$qw)
+  xk=parm$xk
   # first derivatives
   dsp=bspline::dbsp(msp)
   pard=bspline::bsppar(dsp)
@@ -656,8 +670,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   
   nb_sf=length(nmsf)
   sf=setNames(rep(1., nb_sf), nmsf)
-  if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(stofull))))
-    stop("following species were asked with scaling factors but are not in the network:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
+  if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(sto))))
+    stop("following species were asked with scaling factors but are not measured:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
   i_sf=match(nmsf, colnames(qwd0))
   
   x=NULL
@@ -743,7 +757,32 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
       paste0("cnst.", rownames(sto)),
       t(outer(colnames(qwv), seq_len(nwv), paste, sep=".")))
 #browser()
-    st=system.time({p=nlsic::lsi_ln(jtot, c(resj), u=u, co=co)})
+    # build equality constraints if asked: matrix -> mate, rhs vector -> ce
+    mate=NULL
+    ce=NULL
+    if (length(lieq)) {
+      # mate: neq x (nmet + (nrow*ncol)_qwv)
+      # we need a path from qwm0 to qwv which is the same as in jtot
+      # e%*%qwm0[,met]=ce => e%*%jtot[imet,]%*%(const,qwv)=ce =>
+      # mete = e%*%jtot[imet,]
+      # for a given equality: $e,$ce are a matrix and rhs vector for qwm0[,met]
+      nqr=nrow(qwm0)
+      iqr=seq_len(nqr)
+      liece=nm_lapply(lieq, function(m, meq) {
+          if (length(meq) == 0L) {
+              NULL
+          } else {
+              im=match(m, colnames(qwm0))
+              i=(im-1L)*nqr+iqr
+              list(e=bspline::bsc(meq[,1L], n=nsp, xk)%*%jtot[i,,drop=FALSE], ce=meq[,2L])
+          }
+      })
+      mate=Reduce(rbind, lapply(liece, `[[`, "e"), NULL)
+      ce=Reduce(c, lapply(liece, `[[`, "ce"), NULL)
+      st=system.time({p=nlsic::lsie_ln(jtot, c(resj), u=u, co=co, e=mate, ce=ce, rcond=1./tol)})
+    } else {
+      st=system.time({p=nlsic::lsi_ln(jtot, c(resj), u=u, co=co, rcond=1./tol)})
+    }
     if (anyNA(p))
       stop("Error in least squares with constraints:\n", attr(p, "mes"))
     if (nb_sf) {
