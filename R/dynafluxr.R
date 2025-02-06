@@ -57,6 +57,16 @@ nm_lapply=function(X, FUN, ...) {
   stopifnot(length(nms) == length(X))
   setNames(lapply(seq_along(X), function(i) FUN(nms[i], X[[i]], ...)), nms)
 }
+#' sdy for column covariance of \code{qw%*%A}
+#' @noRd
+#' @keywords internal
+sdyA=function(sdy, A, transp=FALSE) {
+  # sdyA =sqrt( diag (A' diag(sdy**2) A)) if transp is FALSE
+  if (transp)
+    sqrt(diag(tcrossprod(mrowv(A, sdy^2), A)))
+  else
+    sqrt(diag(crossprod(A, (sdy^2)*A)))
+}
 
 #' Function to be called from shell command line
 #'
@@ -812,12 +822,22 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     }
     jinv=sinvsd(jtot) # generalized inverse of jtot for sd
 #browser()
-    sdp=sqrt(diag(tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)))
-    if (nb_sf)
-      sdp=sdp[-seq_len(nb_sf)]
+    covp=tcrossprod(slam::matprod_simple_triplet_matrix(jinv, covm0),jinv)
+    sdp=sqrt(diag(covp))
+    if (nb_sf) {
+      i_sf=seq_len(nb_sf)
+      sdp=sdp[-i_sf]
+      covp=covp[-i_sf, -i_sf, drop=FALSE]
+    }
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
     sdrate=sdp[-icnst]
+    covqwv=covp[-icnst,-icnst]
+    # covqwd is mean of nrate submatrices
+    iwv=seq_len(nwv)
+    lcov=lapply(seq(nrate)-1L, function(i) covqwv[i*nwv+iwv,i*nwv+iwv])
+    covqwd=Reduce("+", lcov)/nwv
+    sdyd=sqrt(sapply(lcov, function(mat) mean(mat/covqwd)))
     dim(sdrate)=c(nwv, nrate)
     colnames(sdrate)=colnames(sto)
   } else {
@@ -884,22 +904,12 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
 
       #print(c("sf=", sf, "; rss=", norm2(t(qwd0)-sto%*%t(qwv))))
       # find sd
-      sdd=sqrt(diag(covqwd))%o%parm$sdy
-      #sdd=sdd[,!is.na(parm$sdy),drop=FALSE]
-      sdd0=matrix(0., nrow=nrow(sdd), ncol=nmet)
-      colnames(sdd0)=rownames(sto)
-      sdd0[,colnames(sdd)]=sdd
-      sit=t(stoinvsd)
-      sdrate=structure(double(nrow(sdd0)*nrate), dim=c(nrow(sdd0), nrate), dimnames=list(NULL, colnames(sto)))
-      for (i in seq_len(nrow(sdd))) {
-        di=sdd0[i,]
-        dsit=di*sit
-        for (j in seq_len(ncol(sto)))
-          sdrate[i,j]=sqrt(dsit[,j]%*%dsit[,j])
-      }
+      sdyd=sdyA(parm$sdy, stoinvsd, transp=TRUE)
+      sdrate=sqrt(diag(covqwd))%o%sdyd
     }
     }) # system.time()
   }
+#browser()
   if (nb_sf) {
     qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
     i=nmsf %in% colnames(parm$qw)
@@ -931,12 +941,26 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   isp=bspline::ibsp(fsp, const=const)
   pari=bspline::bsppar(isp)
 #browser()
-  if (any({imin <- apply(pari$qw, 2, min); ineg <- imin < 0.})) {
+  if (any({imin <- apply(pari$qw, 2L, min); ineg <- imin < 0.})) {
     e=environment(isp)
     ineg=names(ineg[ineg])
-    e$qw[,ineg]=arrApply::arrApply(e$qw[,ineg,drop=FALSE], 2, "addv", v=-imin[ineg])
+    e$qw[,ineg]=arrApply::arrApply(e$qw[,ineg,drop=FALSE], 2L, "addv", v=-imin[ineg])
     pari=bspline::bsppar(isp)
   }
+  # sdi: SD of integrated metabolites
+  # qwi = Y%*%qwde
+  # SD of additive constants are ignored
+  # cov(qwi) =  <Y qwde, qwde' Y'> = Y covde Y'
+  Y=bspline::imat(fsp)
+  covqwi=tcrossprod(Y %*% covqwd, Y)
+  sdyi=sdyA(sdyd, stofull, transp=TRUE)
+  sdi=sqrt(diag(covqwi)) %o% sdyi
+  e=environment(isp)
+  e$covqw=covqwi
+  e$sdy=sdyd
+  e$sdqw=sdi
+  pari=bspline::bsppar(isp)
+  
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
   # integrated residuals m-\int sto*f

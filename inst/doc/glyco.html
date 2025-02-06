@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<title>Metabolic Flux Dynamics in Glycolysis with <code>dynafluxr</code></title>
+<style type="text/css">
+/**
+ * Prism.s theme ported from highlight.js's xcode style
+ */
+pre code {
+  padding: 1em;
+}
+.token.comment {
+  color: #007400;
+}
+.token.punctuation {
+  color: #999;
+}
+.token.tag,
+.token.selector {
+  color: #aa0d91;
+}
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #1c00cf;
+}
+.token.property,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin {
+  color: #c41a16;
+}
+.token.inserted {
+  background-color: #ccffd8;
+}
+.token.deleted {
+  background-color: #ffebe9;
+}
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+  color: #9a6e3a;
+}
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #836c28;
+}
+.token.function,
+.token.class-name {
+  color: #DD4A68;
+}
+.token.regex,
+.token.important,
+.token.variable {
+  color: #5c2699;
+}
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}
+</style>
+<style type="text/css">
+body {
+  font-family: sans-serif;
+  max-width: 800px;
+  margin: auto;
+  padding: 1em;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+body, .footnotes, code { font-size: .9em; }
+li li { font-size: .95em; }
+*, *:before, *:after {
+  box-sizing: inherit;
+}
+pre, img { max-width: 100%; }
+pre, pre:hover {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+pre code {
+  display: block;
+  overflow-x: auto;
+}
+code { font-family: 'DejaVu Sans Mono', 'Droid Sans Mono', 'Lucida Console', Consolas, Monaco, monospace; }
+:not(pre) > code, code[class] { background-color: #F8F8F8; }
+code.language-undefined, pre > code:not([class]) {
+  background-color: inherit;
+  border: 1px solid #eee;
+}
+table {
+  margin: auto;
+  border-top: 1px solid #666;
+}
+table thead th { border-bottom: 1px solid #ddd; }
+th, td { padding: 5px; }
+thead, tfoot, tr:nth-child(even) { background: #eee; }
+blockquote {
+  color: #666;
+  margin: 0;
+  padding-left: 1em;
+  border-left: 0.5em solid #eee;
+}
+hr, .footnotes::before { border: 1px dashed #ddd; }
+.frontmatter { text-align: center; }
+#TOC .numbered li { list-style: none; }
+#TOC .numbered { padding-left: 0; }
+#TOC .numbered ul { padding-left: 1em; }
+table, .body h2 { border-bottom: 1px solid #666; }
+.body .appendix, .appendix ~ h2 { border-bottom-style: dashed; }
+.footnote-ref a::before { content: "["; }
+.footnote-ref a::after { content: "]"; }
+section.footnotes::before {
+  content: "";
+  display: block;
+  max-width: 20em;
+}
+
+@media print {
+  body {
+    font-size: 12pt;
+    max-width: 100%;
+  }
+  tr, img { page-break-inside: avoid; }
+}
+@media only screen and (min-width: 992px) {
+  pre { white-space: pre; }
+}
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex/dist/katex.min.css">
+</head>
+<body>
+<div class="frontmatter">
+<div class="title"><h1>Metabolic Flux Dynamics in Glycolysis with <code>dynafluxr</code></h1></div>
+<div class="author"><h2>Serguei Sokol^[TBI, Université de Toulouse, CNRS, INRAE, INSA, Toulouse, France] ^[MetaboHUB, National Infrastructure of Metabolomics and Fluxomics, Toulouse 31077, France]</h2></div>
+<div class="date"><h3>2022-11-28</h3></div>
+</div>
+<div class="body">
+<pre><code class="language-r">library(dynafluxr)
+</code></pre>
+<h2 id="introduction">Introduction</h2>
+<p>This vignette shows how <code>dynafluxr</code> R package can be used to unravel metabolic flux dynamics from metabolite time-series measurements and a stoichiometric model. No regulation model (like Michaelis-Menten) is required for this task. Our method is heavily relying on B-splines as implemented in <code>bspline</code> package. We show how to prepare measurement data, edit stoichiometric reactions, use various package options and interpret/exploit the results. The data used for this vignette were obtained by NMR measurements on MetaToul-FluxoMet platform, Toulouse Biotechnology Institute (TBI), Toulouse, France. Credits for making these data available go to Pauline Rouane, Cyril Charlier, Guy Lippens. Pierre Millard has shared stoichiometric model. All cited persons are from TBI.</p>
+<h2 id="data-preparations">Data preparations</h2>
+<p>Data must be stored in a <code>.tsv</code> (Tabulation Separated Values) file (<code>.tsv</code> extension is not mandatory, it can be <code>.txt</code>, <code>.csv</code>, whatever, but the field separator must be the tabulation character), one column per chemical specie. The first row describes column names. Time points, at which measurements are done, must be stored in a column whose name starts with ‘Time’. No specie name can start with ‘Time’. Decimal separator must be a point <code>.</code> character. A head of data file used as an example is looking like</p>
+<pre><code class="language-r">fmeas=system.file(&quot;dataglyco/data_PRO.tsv&quot;, package=&quot;dynafluxr&quot;)
+cat(head(readLines(fmeas)), sep=&quot;\n&quot;)
+#&gt; Time	ACE	 ALA 	 FOR 	 PYR 	 ETOH 	 GLC 	 LAC 
+#&gt; 5	0.686079159909981	0.352668904657515	0.271293771262705	0.282469139463095	0.248351940239224	5.16630814568026	0.0712406341958987
+#&gt; 6.75	0.687672444646716	0.361318637275728	0.27391401585408	0.329132846916247	0.251620459437311	5.3910661637285	0.0716638244637927
+#&gt; 8.5	0.690616757561834	0.375205904823668	0.268544625230093	0.383292002434794	0.259032951308249	4.82270369767996	0.0762050140643337
+#&gt; 10.25	0.688103794715911	0.382373449436483	0.271928064222974	0.426170418853683	0.260870660454035	4.63965858112673	0.076885446185115
+#&gt; 12	0.69295232688529	0.403301241274558	0.266181057154522	0.489500439660487	0.271136289284411	4.59847699564914	0.0848684307472358
+</code></pre>
+<p>The raw data may be difficult to read because of tab misalignment and row wrapping. Here are parsed data:</p>
+<pre><code class="language-r">mf=read.delim(fmeas, comment.char=&quot;#&quot;)
+print(head(mf))
+#&gt;    Time       ACE       ALA       FOR       PYR      ETOH      GLC        LAC
+#&gt; 1  5.00 0.6860792 0.3526689 0.2712938 0.2824691 0.2483519 5.166308 0.07124063
+#&gt; 2  6.75 0.6876724 0.3613186 0.2739140 0.3291328 0.2516205 5.391066 0.07166382
+#&gt; 3  8.50 0.6906168 0.3752059 0.2685446 0.3832920 0.2590330 4.822704 0.07620501
+#&gt; 4 10.25 0.6881038 0.3823734 0.2719281 0.4261704 0.2608707 4.639659 0.07688545
+#&gt; 5 12.00 0.6929523 0.4033012 0.2661811 0.4895004 0.2711363 4.598477 0.08486843
+#&gt; 6 13.75 0.6963948 0.4200223 0.2626969 0.5508043 0.2774260 4.538150 0.09194118
+</code></pre>
+<h2 id="stoichiometric-model-preparation">Stoichiometric model preparation</h2>
+<p>The reactions are written as in following example:</p>
+<pre><code class="language-r">fsto=system.file(&quot;dataglyco/network_PRO.txt&quot;, package=&quot;dynafluxr&quot;)
+cat(head(readLines(fsto)), sep=&quot;\n&quot;)
+#&gt; hxk	GLC + ATP -&gt; G6P + ADP
+#&gt; pgi	G6P -&gt; F6P
+#&gt; pfk	F6P + ATP -&gt; FBP + ADP
+#&gt; fba	FBP -&gt; DHAP + GAP
+#&gt; tpi	DHAP -&gt; GAP
+#&gt; gapdh	GAP + NAD -&gt; BPG + NADH
+</code></pre>
+<p>The first field separated by tabulation is a reaction name then reaction itself where species are separated by “ + “ sign and possibly preceded by a stoichiometric coefficient with “ * “ symbol.</p>
+<p>We start by gathering example files in a freshly created working directory, say <code>glyco/</code>:</p>
+<pre><code class="language-r">dir.create(&quot;glyco&quot;)
+#&gt; Warning in dir.create(&quot;glyco&quot;): 'glyco' existe déjà
+file.copy(c(fmeas, fsto), &quot;glyco/&quot;)
+#&gt; [1] FALSE FALSE
+</code></pre>
+<h2 id="data-exploring">Data exploring</h2>
+<p>Let fit available data with B-splines of order 4 and with 5 internal knots (default in <code>dynafluxr</code>), then plot them to have an idea how data looks like:</p>
+<pre><code class="language-r">fmeas=&quot;glyco/data_PRO.tsv&quot;
+mf=read.delim(fmeas, comment.char=&quot;#&quot;)
+nm=colnames(mf)[-1L]
+msp=fitsmbsp(mf$Time, mf[, nm], n=4, nki=5)
+matplot(mf$Time, msp(mf$Time), t=&quot;l&quot;, ylab=&quot;Concentration [mM]&quot;, xlab=&quot;Time [s]&quot;)
+matpoints(mf$Time, mf[, nm], pch=&quot;o&quot;, cex=0.5)
+legend(&quot;topright&quot;, legend=nm, lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-6-1.png" alt="plot of chunk unnamed-chunk-6" /></p>
+<p>We see that glucose (GLC) is going too close to 0, maybe even getting negative. A closer look confirms this (negative values are plotted in blue):</p>
+<pre><code class="language-r">ineg=msp(mf$Time, &quot;GLC&quot;) &lt; 0
+matplot(mf$Time[!ineg], msp(mf$Time, &quot;GLC&quot;)[!ineg], t=&quot;l&quot;, ylab=&quot;C&quot;, xlab=&quot;Time&quot;, main=&quot;GLC&quot;)
+abline(h=0)
+matplot(mf$Time[ineg], msp(mf$Time, &quot;GLC&quot;)[ineg], t=&quot;l&quot;, col=&quot;blue&quot;, lwd=2, add=TRUE)
+matpoints(mf$Time, mf[,&quot;GLC&quot;], pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-7-1.png" alt="plot of chunk unnamed-chunk-7" /></p>
+<p>As concentrations cannot get negative values by definition, we constraint B-splines to non negative values with option <code>positive=1</code></p>
+<pre><code class="language-r">msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive=1)
+ineg=msp(mf$Time, &quot;GLC&quot;) &lt; 0
+print(sum(ineg))
+#&gt; [1] 0
+matplot(mf$Time, msp(mf$Time, &quot;GLC&quot;), t=&quot;l&quot;, ylab=&quot;C&quot;, xlab=&quot;Time&quot;, main=&quot;GLC&quot;)
+abline(h=0)
+matpoints(mf$Time, mf[,&quot;GLC&quot;], pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-8-1.png" alt="plot of chunk unnamed-chunk-8" /></p>
+<p>Negative values have disappeared but at the end of time interval, around 300 s, GLC curve is increasing which has no physical meaning. Glucose is only consumed in this experimental setup. Fortunately, we can constraint B-splines to be monotonously decreasing for GLC:</p>
+<pre><code class="language-r">vmono=rep(0, length(nm))
+vmono[match(&quot;GLC&quot;,nm)]=-1
+msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive = 1, monotone = vmono)
+matplot(mf$Time, msp(mf$Time, &quot;GLC&quot;), t=&quot;l&quot;, ylab=&quot;C&quot;, xlab=&quot;Time&quot;, main=&quot;GLC&quot;)
+matpoints(mf$Time, mf[,&quot;GLC&quot;], pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-9-1.png" alt="plot of chunk unnamed-chunk-9" /></p>
+<p>Looks good now. In <code>dynafluxr</code>, we have no option to constraint B-splines to non negative values, because it is done automatically. On the other hand, we do need to indicate which specie is supposed to be monotonously decreasing or increasing. It can be be done with <code>--mono MONO</code> option where <code>MONO</code> is a file name appropriately formatted to indicate which metabolite is increasing and which is decreasing. It can also be done with options <code>--incresing</code> and <code>--decreasing</code> with corresponding coma separated lists of specie names. It is this last option that we will use with <code>dynafluxr</code> but for now, let check some other metabolites, e.g. pyruvate (PYR) to be sure that the fit looks good too:</p>
+<pre><code class="language-r">matplot(mf$Time, msp(mf$Time, &quot;PYR&quot;), t=&quot;l&quot;, ylab=&quot;C&quot;, xlab=&quot;Time&quot;, main=&quot;PYR&quot;)
+matpoints(mf$Time, mf[,&quot;PYR&quot;], pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-10-1.png" alt="plot of chunk unnamed-chunk-10" /></p>
+<p>Looks OK, so we are set to move to the next step.</p>
+<h2 id="first-estimate-of-fluxes-with-dynafluxr">First estimate of fluxes with <code>dynafluxr</code></h2>
+<p>We try <code>dynafluxr::cli()</code> (Command Line Interface) function with minimal options, just indicating measurement data, stoichiometric model and, as seen before, that GLC must be monotonously decreasing (<code>--decreasing</code> is abbreviated to <code>--decr</code>):</p>
+<pre><code class="language-r">res=cli(c(&quot;-m&quot;, &quot;glyco/data_PRO.tsv&quot;, &quot;-s&quot;, &quot;glyco/network_PRO.txt&quot;, &quot;--decr&quot;, &quot;GLC&quot;))
+</code></pre>
+<p>The same command could be run from a shell (not R) environment. In this case it would look like:</p>
+<pre><code>$ Rscript -e &quot;dynafluxr::cli()&quot; -m glyco/data_PRO.tsv -s glyco/network_PRO.txt --decr GLC
+</code></pre>
+<p>The full list of available options can be viewed with <code>dynafluxr::cli(&quot;-h&quot;)</code> command. The result of <code>cli()</code> function (in case of no error in run-time), is a series of data and pdf files written in a directory <code>glyco/data_PRO</code> which is the stump of measurement data file:</p>
+<pre><code class="language-r">list.files(&quot;glyco/data_PRO/&quot;)
+#&gt;  [1] &quot;env.RData&quot;   &quot;flux.pdf&quot;    &quot;flux.tsv&quot;    &quot;ispecie.pdf&quot; &quot;ispecie.tsv&quot;
+#&gt;  [6] &quot;rate.pdf&quot;    &quot;rate.tsv&quot;    &quot;Readme.md&quot;   &quot;resid.pdf&quot;   &quot;specie.pdf&quot; 
+#&gt; [11] &quot;specie.tsv&quot;  &quot;stats.tsv&quot;
+</code></pre>
+<p>The file <code>Readme.md</code> describes the content of the result directory. These files can be explored by system tools like pdf-viewers and spreadsheet software but for needs of this vignette we will reproduce some results by R means. As we won’t need result files in this demo page, we’ll cancel their writing with empty option <code>-o &quot;&quot;</code> which normally indicates result directory/archive name if it is different from the default one:</p>
+<pre><code class="language-r">res=cli(c(&quot;-m&quot;, &quot;glyco/data_PRO.tsv&quot;, &quot;-s&quot;, &quot;glyco/network_PRO.txt&quot;, &quot;--decr&quot;, &quot;GLC&quot;, &quot;-o&quot;, &quot;&quot;))
+</code></pre>
+<p>Let now glance on fit quality, i.e. results of \(\chi^2\)-test:</p>
+<pre><code class="language-r">print(res$chi2tab)
+#&gt;            rss      var_ref  df        chi2          pval
+#&gt; ACE   9.372441 3.910221e-06 180 2396908.128  0.000000e+00
+#&gt; ALA   2.227892 6.490101e-06 180  343275.469  0.000000e+00
+#&gt; FOR   2.100474 1.201390e-05 180  174836.897  0.000000e+00
+#&gt; PYR   2.230509 2.025976e-05 180  110095.514  0.000000e+00
+#&gt; ETOH  4.247570 1.392246e-05 180  305087.563  0.000000e+00
+#&gt; GLC  16.385392 8.677776e-03 180    1888.202 3.837689e-282
+#&gt; LAC   4.955555 2.384174e-05 180  207852.085  0.000000e+00
+</code></pre>
+<p>We can see that all \(p\)-values are 0 which means a very poor fit quality. Let see what is going on by plotting integrated species with measurements:</p>
+<pre><code class="language-r">nm=colnames(res$mf)[-1]
+matplot(res$tpp, res$isp(res$tpp, nm), t=&quot;l&quot;, xlab=&quot;Time&quot;, ylab=&quot;C&quot;)
+matpoints(res$tp, res$mf[,nm], pch=&quot;o&quot;, cex=0.5)
+legend(&quot;topright&quot;, legend=nm, lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-15-1.png" alt="plot of chunk unnamed-chunk-15" /></p>
+<p>Indeed, for all species, integrated curves are not fitting well the corresponding data. We take a closer look on pyruvate (PYR) which is buried in the full graph:</p>
+<pre><code class="language-r">plot(res$tpp, res$isp(res$tpp, &quot;PYR&quot;), t=&quot;l&quot;, xlab=&quot;Time&quot;, ylab=&quot;C&quot;, ylim=range(res$mf$PYR))
+points(res$tp, res$mf$PYR, pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-16-1.png" alt="plot of chunk unnamed-chunk-16" />
+We will use PYR example for tracking the fit quality as fit options change.</p>
+<h2 id="getting-fit-better">Getting fit better</h2>
+<p>Let see the integral residual of metabolites which are not measured and thus are supposed to be close to 0:</p>
+<pre><code class="language-r">nmall=rownames(res$sto)
+nm=colnames(res$mf)[-1L]
+nm0=setdiff(nmall, nm)
+matplot(res$tpp, res$risp(res$tpp, nm0), t=&quot;l&quot;, ylab=&quot;M-\u222bSv dt&quot;, xlab=&quot;Time&quot;)
+legend(&quot;topright&quot;, legend=nm0, lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-17-1.png" alt="plot of chunk unnamed-chunk-17" /></p>
+<p>We can see that the most diverging metabolites are fructose bi-phosphate (FBP) and fructose-6-phosphate (F6P). We can try to declare them as not available (NA) thus they won’t degrade least-squares objective function with its diverging from 0 residuals:</p>
+<pre><code class="language-r">res=cli(c(&quot;-m&quot;, &quot;glyco/data_PRO.tsv&quot;, &quot;-s&quot;, &quot;glyco/network_PRO.txt&quot;, &quot;--decr&quot;, &quot;GLC&quot;, &quot;-o&quot;, &quot;&quot;, &quot;--lna&quot;, &quot;FBP,F6P&quot;))
+nmall=rownames(res$sto)
+nm=colnames(res$mf)[-1L]
+nm0=setdiff(nmall, nm)
+layout(t(1:2))
+matplot(res$tpp, res$risp(res$tpp, nm0), t=&quot;l&quot;, ylab=&quot;M-\u222bSv dt&quot;, xlab=&quot;Time&quot;)
+legend(&quot;topright&quot;, legend=nm0, lty=1:5, col=1:6, cex=0.75)
+plot(res$tpp, res$isp(res$tpp, &quot;PYR&quot;), t=&quot;l&quot;, xlab=&quot;Time&quot;, ylab=&quot;C&quot;, ylim=range(res$mf$PYR), main=&quot;PYR&quot;)
+points(res$tp, res$mf$PYR, pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-18-1.png" alt="plot of chunk unnamed-chunk-18" />
+There is some progress in fit quality but PYR is still not well fitted. We try to add next diverging metabolites to NA: BPG (a little bit buried in the plot) and ACCOA.</p>
+<pre><code class="language-r">res=cli(c(&quot;-m&quot;, &quot;glyco/data_PRO.tsv&quot;, &quot;-s&quot;, &quot;glyco/network_PRO.txt&quot;, &quot;--decr&quot;, &quot;GLC&quot;, &quot;-o&quot;, &quot;&quot;, &quot;--lna&quot;, &quot;FBP,F6P,BPG,ACCOA&quot;))
+nmall=rownames(res$sto)
+nm=colnames(res$mf)[-1L]
+nm0=setdiff(nmall, nm)
+layout(t(1:2))
+matplot(res$tpp, res$risp(res$tpp, nm0), t=&quot;l&quot;, ylab=&quot;M-\u222bSv dt&quot;, xlab=&quot;Time&quot;)
+legend(&quot;topright&quot;, legend=nm0, lty=1:5, col=1:6, cex=0.75)
+plot(res$tpp, res$isp(res$tpp, &quot;PYR&quot;), t=&quot;l&quot;, xlab=&quot;Time&quot;, ylab=&quot;C&quot;, ylim=range(res$mf$PYR), main=&quot;PYR&quot;)
+points(res$tp, res$mf$PYR, pch=&quot;o&quot;, cex=0.5)
+</code></pre>
+<p><img src="figure/unnamed-chunk-19-1.png" alt="plot of chunk unnamed-chunk-19" /></p>
+<p>Now, residuals for “0” metabolites are all very close to 0 which means that they are not degrading least squares anymore and PYR is very well fitted. A good overall fit is confirmed by \(\chi^2\)-test:</p>
+<pre><code class="language-r">print(res$chi2tab)
+#&gt;               rss      var_ref  df chi2      pval
+#&gt; ACE  0.0007429421 3.910221e-06 180  190 0.2902766
+#&gt; ALA  0.0012331192 6.490101e-06 180  190 0.2902766
+#&gt; FOR  0.0022826417 1.201390e-05 180  190 0.2902766
+#&gt; PYR  0.0038493543 2.025976e-05 180  190 0.2902766
+#&gt; ETOH 0.0026452678 1.392246e-05 180  190 0.2902766
+#&gt; GLC  1.6487773464 8.677776e-03 180  190 0.2902766
+#&gt; LAC  0.0045299301 2.384174e-05 180  190 0.2902766
+</code></pre>
+<p>as all \(p\)-values are well above 0.05 usual threshold.
+We are ready to see the main result: estimated reaction rates.</p>
+<pre><code class="language-r">matplot(res$tpp, res$vsp(res$tpp), t=&quot;l&quot;, ylab=&quot;Rate [1/s]&quot;, xlab=&quot;Time&quot;)
+legend(&quot;topright&quot;, colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-21-1.png" alt="plot of chunk unnamed-chunk-21" />
+It can be observed some oscillations in reaction rates and we must check if they don’t come from a possible overfitting.</p>
+<h2 id="exploring-problem-of-overfitting">Exploring problem of overfitting</h2>
+<p>By default, the number of internal knots used for fitting is 5. Let try few values under and above (1 to 6) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:</p>
+<pre><code class="language-r">layout(matrix(1:6, nrow=2, byrow=TRUE))
+resk=lapply(1:6, function(k) {
+  r=cli(c(&quot;-m&quot;, &quot;glyco/data_PRO.tsv&quot;, &quot;-s&quot;, &quot;glyco/network_PRO.txt&quot;, &quot;--decr&quot;, &quot;GLC&quot;, &quot;-o&quot;, &quot;&quot;, &quot;--lna&quot;, &quot;FBP,F6P,BPG,ACCOA&quot;, &quot;-k&quot;, k))
+  plot(r$tpp, r$isp(r$tpp, &quot;PYR&quot;), main=paste0(&quot;PYR k=&quot;,k,sep=&quot;&quot;), ylab=&quot;C&quot;, xlab=&quot;Time&quot;, t=&quot;l&quot;)
+  points(r$tp, r$mf$PYR, pch=&quot;o&quot;, cex=0.5)
+  r
+})
+</code></pre>
+<p><img src="figure/unnamed-chunk-22-1.png" alt="plot of chunk unnamed-chunk-22" />
+Starting from value <code>k=3</code>, the fits look satisfactory. Let see what says \(\chi^2\) test:</p>
+<pre><code class="language-r">for (k in 1:6) {
+  cat(&quot;k=&quot;,k,&quot;\n&quot;)
+  print(resk[[k]]$chi2tab)
+}
+#&gt; k= 1 
+#&gt;               rss      var_ref  df      chi2          pval
+#&gt; ACE  0.0009204292 3.910221e-06 184  235.3906  6.251096e-03
+#&gt; ALA  0.0013841113 6.490101e-06 184  213.2650  6.867265e-02
+#&gt; FOR  0.0023114324 1.201390e-05 184  192.3964  3.206649e-01
+#&gt; PYR  0.0992589090 2.025976e-05 184 4899.3133  0.000000e+00
+#&gt; ETOH 0.0027174157 1.392246e-05 184  195.1821  2.722272e-01
+#&gt; GLC  2.3669580284 8.677776e-03 184  272.7609  2.307959e-05
+#&gt; LAC  0.0271184672 2.384174e-05 184 1137.4367 4.456405e-137
+#&gt; k= 2 
+#&gt;               rss      var_ref  df      chi2          pval
+#&gt; ACE  0.0008863323 3.910221e-06 183  226.6706  1.550075e-02
+#&gt; ALA  0.0013736301 6.490101e-06 183  211.6500  7.210724e-02
+#&gt; FOR  0.0023144314 1.201390e-05 183  192.6461  2.979457e-01
+#&gt; PYR  0.0309274375 2.025976e-05 183 1526.5451 2.001280e-210
+#&gt; ETOH 0.0027269529 1.392246e-05 183  195.8671  2.444416e-01
+#&gt; GLC  2.2933181627 8.677776e-03 183  264.2749  7.895900e-05
+#&gt; LAC  0.0091710408 2.384174e-05 183  384.6633  1.993824e-16
+#&gt; k= 3 
+#&gt;               rss      var_ref  df     chi2         pval
+#&gt; ACE  0.0008564145 3.910221e-06 182 219.0194 3.166424e-02
+#&gt; ALA  0.0013111246 6.490101e-06 182 202.0191 1.473762e-01
+#&gt; FOR  0.0022969447 1.201390e-05 182 191.1905 3.055006e-01
+#&gt; PYR  0.0094076563 2.025976e-05 182 464.3518 1.348948e-26
+#&gt; ETOH 0.0026877832 1.392246e-05 182 193.0537 2.733140e-01
+#&gt; GLC  2.2180473224 8.677776e-03 182 255.6009 2.623515e-04
+#&gt; LAC  0.0044087100 2.384174e-05 182 184.9156 4.258625e-01
+#&gt; k= 4 
+#&gt;               rss      var_ref  df     chi2         pval
+#&gt; ACE  0.0007616405 3.910221e-06 181 194.7819 0.2291696351
+#&gt; ALA  0.0012558437 6.490101e-06 181 193.5014 0.2490871435
+#&gt; FOR  0.0022975350 1.201390e-05 181 191.2397 0.2866340063
+#&gt; PYR  0.0038535634 2.025976e-05 181 190.2078 0.3047174932
+#&gt; ETOH 0.0026487379 1.392246e-05 181 190.2492 0.3039794844
+#&gt; GLC  2.1327147015 8.677776e-03 181 245.7674 0.0009666041
+#&gt; LAC  0.0042670230 2.384174e-05 181 178.9728 0.5286454950
+#&gt; k= 5 
+#&gt;               rss      var_ref  df chi2      pval
+#&gt; ACE  0.0007429421 3.910221e-06 180  190 0.2902766
+#&gt; ALA  0.0012331192 6.490101e-06 180  190 0.2902766
+#&gt; FOR  0.0022826417 1.201390e-05 180  190 0.2902766
+#&gt; PYR  0.0038493543 2.025976e-05 180  190 0.2902766
+#&gt; ETOH 0.0026452678 1.392246e-05 180  190 0.2902766
+#&gt; GLC  1.6487773464 8.677776e-03 180  190 0.2902766
+#&gt; LAC  0.0045299301 2.384174e-05 180  190 0.2902766
+#&gt; k= 6 
+#&gt;               rss      var_ref  df     chi2       pval
+#&gt; ACE  0.0007275983 3.910221e-06 179 186.0760 0.34300006
+#&gt; ALA  0.0012226780 6.490101e-06 179 188.3912 0.30048379
+#&gt; FOR  0.0022712096 1.201390e-05 179 189.0484 0.28892309
+#&gt; PYR  0.0044116953 2.025976e-05 179 217.7565 0.02550377
+#&gt; ETOH 0.0026275909 1.392246e-05 179 188.7303 0.29448904
+#&gt; GLC  1.7683660757 8.677776e-03 179 203.7810 0.09877058
+#&gt; LAC  0.0044048848 2.384174e-05 179 184.7552 0.36838952
+</code></pre>
+<p>We can see that \(p\)-value is above 0.05 for all metabolites only for k=5. We will retain this value as giving the best fit.</p>
+<p>The total data fit for k=5 looks like:</p>
+<pre><code class="language-r">res=resk[[5L]]
+nm=colnames(res$mf)[-1L]
+matplot(res$tpp, res$isp(res$tpp, nm), t=&quot;l&quot;)
+matpoints(res$tp, res$mf[,nm], pch=&quot;o&quot;, cex=0.5)
+legend(&quot;topright&quot;, legend=nm, lty=1:5, col=1:6)
+</code></pre>
+<p><img src="figure/unnamed-chunk-24-1.png" alt="plot of chunk unnamed-chunk-24" />
+and reaction rates:</p>
+<pre><code class="language-r">matplot(res$tpp, res$vsp(res$tpp), t=&quot;l&quot;, ylab=&quot;Rate [1/s]&quot;, xlab=&quot;Time&quot;)
+legend(&quot;topright&quot;, colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-25-1.png" alt="plot of chunk unnamed-chunk-25" />
+The curve oscillations are present for some fluxes but as seen before and based on \(\chi^2\) test, in this case, it is not due to overfitting but reflects system behavior through measured data.</p>
+<p>In the result files, the rates are plotted with semi-transparent error bands ±2·SD. Let do it here too:</p>
+<pre><code class="language-r">nmreac=colnames(res$sto)
+matplot(res$tpp, res$vsp(res$tpp, nmreac), t=&quot;l&quot;, ylab=&quot;Rate [1/s]&quot;, xlab=&quot;Time&quot;)
+tppr=c(res$tpp, rev(res$tpp))
+ireac=0
+for (reac in nmreac) {
+  vp=res$vsp(res$tpp, reac, fsd=2)
+  vm=rev(res$vsp(res$tpp, reac, fsd=-2))
+  polygon(tppr, c(vp, vm), border=NA, col=do.call(rgb, as.list(c(col2rgb(ireac%%6+1)/255, 0.3))))
+  ireac=ireac+1
+}
+legend(&quot;topright&quot;, nmreac, lty=1:5, col=1:6, cex=0.75)
+</code></pre>
+<p><img src="figure/unnamed-chunk-26-1.png" alt="plot of chunk unnamed-chunk-26" /></p>
+<p>Having estimated rates, we can now explore details of metabolic fluxes. Not only we have the total flux \(\frac{dM_i}{dt}\) but also all its components coming from involved reactions \(S_{ij}v_j\). For PYR, it gives:</p>
+<pre><code class="language-r">nm=&quot;PYR&quot;
+jnz=names(which(res$stofull[nm,] != 0)) # non-zero coeffs, i.e. reactions involved in PYR mass balance
+fl=t(res$stofull[nm,jnz]*t(res$vsp(res$tpp, jnz))) # each rate v_j is multiplied by S_ij
+fl=cbind(res$fsp(res$tpp, nm), fl) # add total flux
+matplot(res$tpp, fl, t=&quot;l&quot;, ylab=&quot;Flux [mM/s]&quot;, xlab=&quot;Time [s]&quot;, main=&quot;PYR flux components&quot;)
+legend(&quot;topright&quot;, legend=c(&quot;Total&quot;, jnz), lty=1:5, col=1:6)
+</code></pre>
+<p><img src="figure/unnamed-chunk-27-1.png" alt="plot of chunk unnamed-chunk-27" /></p>
+<h2 id="conclusion">Conclusion</h2>
+<p>In this vignette, we have shown a step-by-step procedure for reaction rate estimation from time-series metabolite measurements and a stoichiometric model. We have seen how package parameters can be chosen, how fit quality can be evaluated and how data can be presented and exploited. Based on this vignette, user should be ready to work with his own data set and stoichiometric model.</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/combine/npm/katex/dist/katex.min.js,npm/katex/dist/contrib/auto-render.min.js,npm/@xiee/utils/js/render-katex.js" defer></script>
+</body>
+</html>

@@ -6,7 +6,7 @@ author:
 date: 2022-11-28
 vignette: >
   %\VignetteIndexEntry{glyco}
-  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEngine{knitr::knitr}
   %\VignetteEncoding{UTF-8}
 ---
 
@@ -70,7 +70,7 @@ legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75)
 We see that glucose (GLC) is going too close to 0, maybe even getting negative. A closer look confirms this (negative values are plotted in blue):
 ```{r}
 ineg=msp(mf$Time, "GLC") < 0
-matplot(mf$Time[!ineg], msp(mf$Time, "GLC")[!ineg], t="l", ylab="C", xlab="T", main="GLC")
+matplot(mf$Time[!ineg], msp(mf$Time, "GLC")[!ineg], t="l", ylab="C", xlab="Time", main="GLC")
 abline(h=0)
 matplot(mf$Time[ineg], msp(mf$Time, "GLC")[ineg], t="l", col="blue", lwd=2, add=TRUE)
 matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
@@ -81,7 +81,7 @@ As concentrations cannot get negative values by definition, we constraint B-spli
 msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive=1)
 ineg=msp(mf$Time, "GLC") < 0
 print(sum(ineg))
-matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="T", main="GLC")
+matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="Time", main="GLC")
 abline(h=0)
 matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
 ```
@@ -92,13 +92,13 @@ Negative values have disappeared but at the end of time interval, around 300 s, 
 vmono=rep(0, length(nm))
 vmono[match("GLC",nm)]=-1
 msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive = 1, monotone = vmono)
-matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="T", main="GLC")
+matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="Time", main="GLC")
 matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
 ```
 
 Looks good now. In `dynafluxr`, we have no option to constraint B-splines to non negative values, because it is done automatically. On the other hand, we do need to indicate which specie is supposed to be monotonously decreasing or increasing. It can be be done with `--mono MONO` option where `MONO` is a file name appropriately formatted to indicate which metabolite is increasing and which is decreasing. It can also be done with options `--incresing` and `--decreasing` with corresponding coma separated lists of specie names. It is this last option that we will use with `dynafluxr` but for now, let check some other metabolites, e.g. pyruvate (PYR) to be sure that the fit looks good too:
 ```{r, fig.width=6, fig.height=4}
-matplot(mf$Time, msp(mf$Time, "PYR"), t="l", ylab="C", xlab="T", main="PYR")
+matplot(mf$Time, msp(mf$Time, "PYR"), t="l", ylab="C", xlab="Time", main="PYR")
 matpoints(mf$Time, mf[,"PYR"], pch="o", cex=0.5)
 ```
 
@@ -138,14 +138,14 @@ We can see that all $p$-values are 0 which means a very poor fit quality. Let se
 
 ```{r}
 nm=colnames(res$mf)[-1]
-matplot(res$tpp, res$isp(res$tpp, nm), t="l", xlab="T", ylab="C")
+matplot(res$tpp, res$isp(res$tpp, nm), t="l", xlab="Time", ylab="C")
 matpoints(res$tp, res$mf[,nm], pch="o", cex=0.5)
 legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75)
 ```
 
 Indeed, for all species, integrated curves are not fitting well the corresponding data. We take a closer look on pyruvate (PYR) which is buried in the full graph:
 ```{r}
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="T", ylab="C", ylim=range(res$mf$PYR))
+plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR))
 points(res$tp, res$mf$PYR, pch="o", cex=0.5)
 ```
 We will use PYR example for tracking the fit quality as fit options change.
@@ -158,20 +158,20 @@ Let see the integral residual of metabolites which are not measured and thus are
 nmall=rownames(res$sto)
 nm=colnames(res$mf)[-1L]
 nm0=setdiff(nmall, nm)
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="T")
+matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
 legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
 ```
 
-We can see that the most diverging metabolites are fructose bi-phosphate (FBP) and fructose-6-phosphate (F6P). We can try to declare them as not available (NA) thus they won't degrade least-squares objective function with their diverging from 0 residuals:
+We can see that the most diverging metabolites are fructose bi-phosphate (FBP) and fructose-6-phosphate (F6P). We can try to declare them as not available (NA) thus they won't degrade least-squares objective function with its diverging from 0 residuals:
 ```{r}
 res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P"))
 nmall=rownames(res$sto)
 nm=colnames(res$mf)[-1L]
 nm0=setdiff(nmall, nm)
 layout(t(1:2))
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="T")
+matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
 legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="T", ylab="C", ylim=range(res$mf$PYR), main="PYR")
+plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR), main="PYR")
 points(res$tp, res$mf$PYR, pch="o", cex=0.5)
 ```
 There is some progress in fit quality but PYR is still not well fitted. We try to add next diverging metabolites to NA: BPG (a little bit buried in the plot) and ACCOA.
@@ -181,9 +181,9 @@ nmall=rownames(res$sto)
 nm=colnames(res$mf)[-1L]
 nm0=setdiff(nmall, nm)
 layout(t(1:2))
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="T")
+matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
 legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="T", ylab="C", ylim=range(res$mf$PYR), main="PYR")
+plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR), main="PYR")
 points(res$tp, res$mf$PYR, pch="o", cex=0.5)
 ```
 
@@ -195,7 +195,7 @@ print(res$chi2tab)
 as all $p$-values are well above 0.05 usual threshold.
 We are ready to see the main result: estimated reaction rates.
 ```{r}
-matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="T")
+matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="Time")
 legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
 ```
 It can be observed some oscillations in reaction rates and we must check if they don't come from a possible overfitting.
@@ -207,7 +207,7 @@ By default, the number of internal knots used for fitting is 5. Let try few valu
 layout(matrix(1:6, nrow=2, byrow=TRUE))
 resk=lapply(1:6, function(k) {
   r=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", k))
-  plot(r$tpp, r$isp(r$tpp, "PYR"), main=paste0("PYR k=",k,sep=""), ylab="C", xlab="T", t="l")
+  plot(r$tpp, r$isp(r$tpp, "PYR"), main=paste0("PYR k=",k,sep=""), ylab="C", xlab="Time", t="l")
   points(r$tp, r$mf$PYR, pch="o", cex=0.5)
   r
 })
@@ -231,7 +231,7 @@ legend("topright", legend=nm, lty=1:5, col=1:6)
 ```
 and reaction rates:
 ```{r}
-matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="T")
+matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="Time")
 legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
 ```
 The curve oscillations are present for some fluxes but as seen before and based on $\chi^2$ test, in this case, it is not due to overfitting but reflects system behavior through measured data.
@@ -239,7 +239,7 @@ The curve oscillations are present for some fluxes but as seen before and based 
 In the result files, the rates are plotted with semi-transparent error bands ±2·SD. Let do it here too:
 ```{r}
 nmreac=colnames(res$sto)
-matplot(res$tpp, res$vsp(res$tpp, nmreac), t="l", ylab="Rate [1/s]", xlab="T")
+matplot(res$tpp, res$vsp(res$tpp, nmreac), t="l", ylab="Rate [1/s]", xlab="Time")
 tppr=c(res$tpp, rev(res$tpp))
 ireac=0
 for (reac in nmreac) {
