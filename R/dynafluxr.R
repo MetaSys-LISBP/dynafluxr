@@ -831,6 +831,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     }
     # extract sd of mst and qwv
     sdmst=sdp[icnst]
+    sdconst=sdmst
     sdrate=sdp[-icnst]
     covqwv=covp[-icnst,-icnst]
     # covqwd is mean of nrate submatrices
@@ -887,7 +888,9 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
       qwv[]=if (nb_sf) x[-seq_len(nb_sf)] else x
 
       # find sd
-      sdrate=structure(sqrt(diag(covqwd))%o%sqrt(diag(tcrossprod(backsolve(qr.R(qrs), qt)))), dimnames=list(NULL, colnames(sto)))
+      stosdinv=backsolve(qr.R(qrs), qt)
+      sdyd=sdyA(rep(1., nrow(sto)), stosdinv, transp=TRUE)
+      sdrate=structure(sqrt(diag(covqwd))%o%sdyd, dimnames=list(NULL, colnames(sto)))
     } else {
       # solve plain dLS
       #qwv=tcrossprod(qwd0, stoinv)
@@ -905,10 +908,12 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
       #print(c("sf=", sf, "; rss=", norm2(t(qwd0)-sto%*%t(qwv))))
       # find sd
       sdyd=sdyA(parm$sdy, stoinvsd, transp=TRUE)
-      sdrate=sqrt(diag(covqwd))%o%sdyd
+      sdrate=structure(sqrt(diag(covqwd))%o%sdyd, dimnames=list(NULL, colnames(sto)))
     }
+    sdconst=double(nrow(sto))
     }) # system.time()
   }
+  names(sdconst)=rownames(sto)
 #browser()
   if (nb_sf) {
     qwd0[,i_sf]=mrowv(qwd0[,i_sf,drop=FALSE], sf)
@@ -927,25 +932,26 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   qwde=qwv%*%t(stofull) # dm/dt estimated from rates
   fsp=bspline::par2bsp(nsp-1L, qwde, pard$xk)
   const=setNames(double(nmetfull), colnames(qwde))
+  sdconstfull=const
+  sdconstfull[names(sdconst)]=sdconst
 #browser()
+  isp=bspline::ibsp(fsp) # add const later
   if (!dls) {
     const[names(mst)]=mst
     #browser()
   } else {
     #const[colnames(parm$qw)]=parm$qw[1,] # starting values where known
     #least squares
-    est=colMeans(bspline::ibsp(fsp)(tp, colnames(mf)[-1L]))
-    meas=colMeans(mf[,-1L])
+    est=colMeans(isp(tp, colnames(mf)[-1L]))
+    meas=colMeans(mf[,-1L], na.rm=TRUE)
     const[colnames(mf)[-1L]]=meas-est
   }
-  isp=bspline::ibsp(fsp, const=const)
-  pari=bspline::bsppar(isp)
+  ei=environment(isp)
+  ei$qw=arrApply::arrApply(ei$qw, 2L, "addv", v=const)
 #browser()
-  if (any({imin <- apply(pari$qw, 2L, min); ineg <- imin < 0.})) {
-    e=environment(isp)
+  if (any({imin <- apply(ei$qw, 2L, min); ineg <- imin < 0.})) {
     ineg=names(ineg[ineg])
-    e$qw[,ineg]=arrApply::arrApply(e$qw[,ineg,drop=FALSE], 2L, "addv", v=-imin[ineg])
-    pari=bspline::bsppar(isp)
+    ei$qw[,ineg]=arrApply::arrApply(ei$qw[,ineg,drop=FALSE], 2L, "addv", v=-imin[ineg])
   }
   # sdi: SD of integrated metabolites
   # qwi = Y%*%qwde
@@ -955,10 +961,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   covqwi=tcrossprod(Y %*% covqwd, Y)
   sdyi=sdyA(sdyd, stofull, transp=TRUE)
   sdi=sqrt(diag(covqwi)) %o% sdyi
-  e=environment(isp)
-  e$covqw=covqwi
-  e$sdy=sdyd
-  e$sdqw=sdi
+  sdi[1L,]=sdconstfull
+  ei$covqw=covqwi
+  ei$sdy=sdyd
+  ei$sdqw=sdi
   pari=bspline::bsppar(isp)
   
   # residuals dm/dt-sto*f

@@ -2,9 +2,11 @@ Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of
         Specie Concentrations
-Version: 0.22.0
-Author: Serguei Sokol <sokol@insa-toulouse.fr>
-Maintainer: Serguei Sokol <sokol@insa-toulouse.fr>
+Version: 0.22.1
+Authors@R: person(given = "Serguei",
+                    family = "Sokol",
+                    role = c("aut", "cre"),
+                    email = "sokol@insa-toulouse.fr")
 Description: Reaction rate dynamics can be retrieved from time-series measurements
   of chemical species and/or their isotopes. User has to provide
   corresponding stoechiometric

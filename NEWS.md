@@ -1,3 +1,6 @@
+## v0.22.1 2025-02-07
+- added isp() SD for --wsd too
+
 ## v0.22.0 2025-02-06
 - added SD for isp() (no --wsd yet)
 
