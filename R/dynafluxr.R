@@ -217,6 +217,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
       make_option(c("--fsd"), type="double", default=2., help=
         "SD factor for plotting gray band \u00b1fsd*SD around spline curves. Use '--fsd=0' to cancel these bands. [default %default]"
       ),
+      make_option(c("--regular_grid"), action="store_true", default=TRUE, help=
+        "use regular knot grid (default: TRUE)]"
+      ),
       make_option(c("--pch"), type="character", default=".", help=
         "Plotting character for dots. [default %default]"
       )
@@ -352,8 +355,10 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   }
   
   # main call
-  res=fdyn(mf[ikeep,!ina], sto, nsp=opt$norder, nki=opt$knot, lieq=lieq[setdiff(names(lieq), lna)], monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr)
+  res=fdyn(mf[ikeep,!ina], sto, nsp=opt$norder, nki=opt$knot, lieq=lieq[setdiff(names(lieq), lna)], monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr, regular_grid=opt$regular_grid)
   res$mffull=mf
+  res$opt=opt
+  res$date=date()
   #res
   # write result files (rd is a temporary dir for results)
   # at the end we'll move all files into a zip archive in the working dir
@@ -555,6 +560,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   (default FALSE, i.e. no weighting is used)
 #' @param nmsf Character vector, list of species for which scaling factor maust be estimated for --dls.
 #' @param tol Double scalar, tolerance for detecting singular matrices and solving linear systems
+#' @param regular_grid Logical scalar, use regular knot grid (default: TRUE)
 #' @details
 #'   Each item in \code{lieq} corresponds to a specie and is a
 #'   2 column matrix (Time, Value). Each
@@ -586,14 +592,14 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   \item{sf:}{ named scale factor vector}
 #'   \item{internal_knot_ref:}{ number of internal knots used for estimation of var_ref}
 #' }
-#' @importFrom bspline smbsp dbsp bsppar par2bsp ibsp iknots
+#' @importFrom bspline fitsmbsp dbsp bsppar par2bsp ibsp
 #' @importFrom slam simple_triplet_zero_matrix matprod_simple_triplet_matrix
 #' @importFrom arrApply arrApply
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
 #' @export
 fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
-    atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10) {
+    atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10, regular_grid=TRUE) {
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
@@ -607,8 +613,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   # estimate var_ref with biggest d2 in variance (for chi2 test)
   nki_test=seq(max(0, nki-5), nki+5)
   var_test=sapply(nki_test, function(k) {
-    xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
-    s=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, lieq=lieq, estSD=FALSE);
+    #xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
+    s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono_mf, positive=1, lieq=lieq, estSD=FALSE, regular_grid=regular_grid);
     if (anyNA(bspline::bsppar(s)$qw))
       stop("NA appeared in preliminary spline fits")
     base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
@@ -622,10 +628,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
 #browser()
 
   # fit measurements
-  err_tp=min(dtp[dtp != 0], na.rm=TRUE)/10.
+  control=list(errx=min(dtp[dtp != 0], na.rm=TRUE)/100.)
   #xki=bspline::iknots(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lenfit=11L)
-  xki=seq(tp[1L], tp[np], length.out=nki+2L)[c(-1L, -(nki+2L))]
-  msp=bspline::smbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, lieq=lieq, estSD=TRUE)
+  #xki=seq(tp[1L], tp[np], length.out=nki+2L)[c(-1L, -(nki+2L))]
+  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=TRUE, regular_grid=regular_grid)
 #browser()
   # error on metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))

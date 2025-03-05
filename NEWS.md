@@ -1,3 +1,7 @@
+## v0.23.0 2025-03-05
+- added option `regular_grid` (default: TRUE)
+- added date and opt to res
+
 ## v0.22.1 2025-02-07
 - added isp() SD for --wsd too
 
