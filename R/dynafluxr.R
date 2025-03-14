@@ -149,8 +149,9 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     here '2' is a such coefficient. The spaces ' ' around '*' are important."
       ),
       make_option(c("-k", "--knot"), type="integer", default=5, help=
-        "Internal knot number for B-splines fitting specie and rate dynamics
-    [default %default]"
+        "Internal knot number for B-splines fitting specie and rate
+        dynamics, must be less or equal to length(time_points)-2
+        [default %default]"
       ),
       make_option(c("-n", "--norder"), type="integer", default=4, help=
         "B-splines polynomial order for specie kinetics. The rate dynamics will have
@@ -603,6 +604,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   tp=mf$Time
   dtp=diff(tp)
   np=length(tp)
+  stopifnot(nki <= np-2L)
   tpp=seq(tp[1L], tp[np], length.out=npi+1L)
   # eliminate all NA columns from mf
   icna=apply(mf, 2L, function(v) all(is.na(v)))
@@ -611,13 +613,13 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   mono_mf=if (length(monotone) > 1L) monotone[colnames(mf)[-1L]] else monotone
 #browser()
   # estimate var_ref with biggest d2 in variance (for chi2 test)
-  nki_test=seq(max(0, nki-5), nki+5)
+  nki_test=seq(max(0L, nki-5L), min(nki+5L, np-2L))
   var_test=sapply(nki_test, function(k) {
     #xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
     s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono_mf, positive=1, lieq=lieq, estSD=FALSE, regular_grid=regular_grid);
     if (anyNA(bspline::bsppar(s)$qw))
       stop("NA appeared in preliminary spline fits")
-    base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2, na.rm=TRUE)
+    base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2L, na.rm=TRUE)
   })
   # detect maximal curvature -> ku=2*d2/(1+d1^2)^1.5
   ly=log(base::colSums(var_test, na.rm=TRUE))
@@ -1006,4 +1008,192 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     res$atomlen=atomlen
   }
   res
+}
+gui=function() {
+  pkgs=c("shiny", "shinyFiles", "shinyjs")
+  available=sapply(pkgs, requireNamespace, quietly=TRUE)
+  if (any(!available))
+    stop("Following R packages are necessary for GUI running. Install them first:\n\t", paste0(pkgs[!available], collapse="\n\t"))
+  library(shiny)
+  library(shinyFiles)
+  library(shinyjs)
+  inp2val=function(input)
+    sapply(nm_par, function(nm) as.character(input[[nm]]))
+
+  nm_par=c("knot", "norder", "lna", "increasing", "decreasing", "skip", "zip", "dls", "wsd", "npi", "sf", "nosf", "sderr", "fsd", "regular_grid", "pch")
+  temp_dir=tempdir()
+  addResourcePath("pdfs", temp_dir)  # Make temp_dir accessible via /pdfs/
+  ui <- fluidPage(
+    useShinyjs(),
+    titlePanel("DynaFluxR"),
+    p("Choose parameters (measurement and network files are mandatory) and click on 'Run'."),
+    p("Parameters can be saved in a .param file and loaded later"),
+    sidebarLayout(
+      sidebarPanel(
+        fileInput("meas", "Measurement File (-m):"),
+        fileInput("sto", "Stoichiometric Model (-s):"),
+        actionButton(inputId = "btn_more", label = "more / less parameters"),
+        conditionalPanel("input.btn_more % 2 == 1",
+          numericInput("knot", "Knot Number (-k):", 5, min = 0),
+          numericInput("norder", "Polynomial Order (-n):", 4, min = 1),
+          textInput("lna", "List of NA Species (--lna):"),
+          fileInput("constr", "Constraint File (-c):"),
+          fileInput("atom", "Atom Length File (-a):"),
+          fileInput("mono", "Monotonicity File (--mono):"),
+          textInput("increasing", "Increasing Species (--increasing):"),
+          textInput("decreasing", "Decreasing Species (--decreasing):"),
+          numericInput("skip", "Skip First Time Points (--skip):", 0, min = 0),
+          checkboxInput("zip", "Create ZIP Archive (--zip)", FALSE),
+          checkboxInput("dls", "Use Differential Least Squares (--dls)", FALSE),
+          checkboxInput("wsd", "Weight Least Squares (--wsd)", FALSE),
+          numericInput("npi", "Plot Intervals (--npi):", 300, min = 100),
+          textInput("sf", "Scaling Factors (--sf):"),
+          textInput("nosf", "No Scaling Factors (--nosf):"),
+          textInput("sderr", "Species Error SD (--sderr):"),
+          numericInput("fsd", "SD Factor for Plot (--fsd):", 2, min = 0),
+          checkboxInput("regular_grid", "Use Regular Grid (--regular_grid)", TRUE),
+          textInput("pch", "Plot Character (--pch):", ".")
+        ),
+        hr(),
+        actionButton("run", "Run"),
+        actionButton("stop", "Stop App"),
+        hr(),
+        #actionButton("save_params", "Save Parameters"),
+        shinySaveButton("save_params", "Save parameters", "Choose a file to store parameters (end with .param)", multiple = FALSE),
+        #fileInput("load_params", "Load Parameters (.param)"),
+        shinyFilesButton("load_params", "Load Parameters (.param)", "Please select a file with parameters to load (.param)", multiple = FALSE, viewtype = "detail")
+      ),
+      mainPanel(
+        h2("Results"),
+        selectInput("pdf_select", "Select PDF:", choices = NULL),
+        uiOutput("pdf_view"),
+        selectInput("tsv_select", "Select TSV:", choices = NULL),
+        tableOutput("tsv_table"),
+        downloadButton("downloadZip", label = "Download Zip archive")
+      )
+    )
+  )
+
+  server <- function(input, output, session) {
+    hd=path.expand("~")
+    wd=getwd()
+    volumes <- c(Home = hd, getVolumes()())
+    wd=if (startsWith(wd, hd)) substring(wd, nchar(hd)+2L) else ""
+    shinyFileChoose(input, "load_params", roots = volumes, session = session, defaultPath = wd)
+    shinyFileSave(input, "save_params", roots = volumes, session=session, defaultPath = wd)
+    observeEvent(input$run, {
+      #req(input$meas)
+      #req(input$sto)
+      args <- c(
+        if (!is.null(input$meas)) c("-m", input$meas$datapath),
+        if (!is.null(input$sto)) c("-s", input$sto$datapath),
+        "-k", input$knot,
+        "-n", input$norder,
+        if (nzchar(input$lna)) c("--lna", input$lna),
+        if (!is.null(input$constr)) c("-c", input$constr$datapath),
+        if (!is.null(input$atom)) c("-a", input$atom$datapath),
+        if (!is.null(input$mono)) c("--mono", input$mono$datapath),
+        if (nzchar(input$increasing)) c("--increasing", input$increasing),
+        if (nzchar(input$decreasing)) c("--decreasing", input$decreasing),
+        if (!is.na(input$skip)) c("--skip", input$skip),
+        if (input$zip == "TRUE") "--zip",
+        if (input$dls == "TRUE") "--dls",
+        if (input$wsd == "TRUE") "--wsd",
+        "--npi", input$npi,
+        if (nzchar(input$sf)) c("--sf", input$sf),
+        if (nzchar(input$nosf)) c("--nosf", input$nosf),
+        if (nzchar(input$sderr)) c("--sderr", input$sderr),
+        "--fsd", input$fsd,
+        if (input$regular_grid == "FALSE") c("--regular_grid", "FALSE"),
+        if (nzchar(input$pch)) c("--pch", input$pch)
+      )
+      result <- tryCatch({
+        withCallingHandlers({
+          do.call(cli, list(args))
+        }, warning = function(w) {
+          showNotification(paste("Warning:", conditionMessage(w)), type = "warning")
+        })
+        }, error = function(e) {
+          showNotification(paste("Error:", conditionMessage(e)), type = "error")
+      })
+      odir=tools::file_path_sans_ext(input$meas$datapath)
+      files <- list.files(odir, full.names = TRUE)
+      pdf_files <- files[grepl("\\.pdf$", files)]
+      tsv_files <- files[grepl("\\.tsv$", files)]
+      file.copy(files, temp_dir, overwrite=TRUE)
+      if (length(files)) {
+        updateSelectInput(session, "pdf_select", choices = basename(pdf_files), selected="ispecie.pdf")
+        updateSelectInput(session, "tsv_select", choices = basename(tsv_files), selected="stats.tsv")
+        output$tsv_table <- renderTable({
+          odir=tools::file_path_sans_ext(input$meas$datapath)
+          req(input$tsv_select)
+          read.table(file.path(odir, input$tsv_select), header = TRUE, sep = "\t")
+        })
+        output$pdf_view <- renderUI({
+          req(input$pdf_select)
+          tags$iframe(style = "width:100%; height:800px;", src = paste0("/pdfs/", input$pdf_select))
+        })
+        disable("downloadZip")
+        enable("pdf_select")
+        enable("tsv_select")
+      } else {
+        enable("downloadZip")
+        updateSelectInput(session, "pdf_select", choices = character(0L))
+        updateSelectInput(session, "tsv_select", choices = character(0L))
+        disable("pdf_select")
+        disable("tsv_select")
+        output$downloadZip <- downloadHandler(
+          filename = function() {
+            paste0(tools::file_path_sans_ext(input$meas$name), ".zip")
+          },
+          content = function(fname) {
+            file.copy(file.path(dirname(odir), paste0(basename(odir), ".zip")), fname)
+          },
+          contentType = "application/zip"
+        )
+        output$tsv_table <- renderTable(NULL)
+        output$pdf_view <- renderUI({
+          tags$iframe(style = "width:100%; height:0px;", src = "")
+        })
+      }
+    })
+    observeEvent(input$save_params, repeat {
+      req(input$save_params)
+      if (is.integer(input$save_params))
+        break
+      save_par <- parseSavePath(volumes, input$save_params)
+      write.table(data.frame(Value=inp2val(input)), save_par$datapath, sep = "\t", row.names = TRUE, col.names = TRUE)
+      break
+    })
+
+    observeEvent(input$load_params, repeat {
+      req(input$load_params)
+      if (is.integer(input$load_params))
+        break
+      load_par <- parseFilePaths(volumes, input$load_params)
+      params <- read.table(load_par$datapath, sep = "\t", header = TRUE)
+      updateNumericInput(session, "knot", value = params["knot", "Value"])
+      updateNumericInput(session, "norder", value = params["norder", "Value"])
+      updateTextInput(session, "lna", value = params["lna", "Value"])
+      updateTextInput(session, "increasing", value = params["increasing", "Value"])
+      updateTextInput(session, "decreasing", value = params["decreasing", "Value"])
+      updateNumericInput(session, "skip", value = params["skip", "Value"])
+      updateCheckboxInput(session, "zip", value = as.logical(params["zip", "Value"]))
+      updateCheckboxInput(session, "dls", value = as.logical(params["dls", "Value"]))
+      updateCheckboxInput(session, "wsd", value = as.logical(params["wsd", "Value"]))
+      updateNumericInput(session, "npi", value = params["npi", "Value"])
+      updateTextInput(session, "sf", value = params["sf", "Value"])
+      updateTextInput(session, "nosf", value = params["nosf", "Value"])
+      updateTextInput(session, "sderr", value = params["sderr", "Value"])
+      updateNumericInput(session, "fsd", value = params["fsd", "Value"])
+      updateCheckboxInput(session, "regular_grid", value = as.logical(params["regular_grid", "Value"]))
+      updateTextInput(session, "pch", value = params["pch", "Value"])
+      break
+    })
+    observeEvent(input$stop, {      
+      stopApp()
+    })
+    session$onSessionEnded(stopApp)
+  }
+  shinyApp(ui, server)
 }

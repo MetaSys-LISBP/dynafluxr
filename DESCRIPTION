@@ -2,7 +2,7 @@ Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of
         Specie Concentrations
-Version: 0.23.0
+Version: 0.24.0
 Authors@R: person(given = "Serguei",
                     family = "Sokol",
                     role = c("aut", "cre"),
@@ -29,6 +29,6 @@ Imports:
     grDevices,
     gmresls (>= 0.2)
 RoxygenNote: 7.3.2
-Suggests: RUnit, knitr
+Suggests: RUnit, knitr, shiny, shinyjs, shinyFiles
 VignetteBuilder: knitr
 NeedsCompilation: no

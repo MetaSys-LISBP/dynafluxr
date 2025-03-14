@@ -1,3 +1,6 @@
+## v0.24.0 2025-03-14
+- added gui()
+
 ## v0.23.0 2025-03-05
 - added option `regular_grid` (default: TRUE)
 - added date and opt to res
