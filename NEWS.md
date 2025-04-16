@@ -1,3 +1,8 @@
+## v0.25.0 2025-04-16
+- added 'date' and a short 'call' for R and Shell (without default params)
+- added scroll to top at the end of calculations
+- launch browser even in script mode
+
 ## v0.24.0 2025-03-14
 - added gui()
 

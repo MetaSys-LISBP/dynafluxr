@@ -2,7 +2,7 @@ Package: dynafluxr
 Type: Package
 Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of
         Specie Concentrations
-Version: 0.24.0
+Version: 0.25.0
 Authors@R: person(given = "Serguei",
                     family = "Sokol",
                     role = c("aut", "cre"),

@@ -1021,6 +1021,7 @@ gui=function() {
     sapply(nm_par, function(nm) as.character(input[[nm]]))
 
   nm_par=c("knot", "norder", "lna", "increasing", "decreasing", "skip", "zip", "dls", "wsd", "npi", "sf", "nosf", "sderr", "fsd", "regular_grid", "pch")
+  par_def=list(knot=5L, norder=4L, skip=0L, npi=300L, fsd=2., pch=".")
   temp_dir=tempdir()
   addResourcePath("pdfs", temp_dir)  # Make temp_dir accessible via /pdfs/
   ui <- fluidPage(
@@ -1034,25 +1035,25 @@ gui=function() {
         fileInput("sto", "Stoichiometric Model (-s):"),
         actionButton(inputId = "btn_more", label = "more / less parameters"),
         conditionalPanel("input.btn_more % 2 == 1",
-          numericInput("knot", "Knot Number (-k):", 5, min = 0),
-          numericInput("norder", "Polynomial Order (-n):", 4, min = 1),
+          numericInput("knot", "Knot Number (-k):", par_def$knot, min = 0),
+          numericInput("norder", "Polynomial Order (-n):", par_def$norder, min = 1),
           textInput("lna", "List of NA Species (--lna):"),
           fileInput("constr", "Constraint File (-c):"),
           fileInput("atom", "Atom Length File (-a):"),
           fileInput("mono", "Monotonicity File (--mono):"),
           textInput("increasing", "Increasing Species (--increasing):"),
           textInput("decreasing", "Decreasing Species (--decreasing):"),
-          numericInput("skip", "Skip First Time Points (--skip):", 0, min = 0),
+          numericInput("skip", "Skip First Time Points (--skip):", par_def$skip, min = 0),
           checkboxInput("zip", "Create ZIP Archive (--zip)", FALSE),
           checkboxInput("dls", "Use Differential Least Squares (--dls)", FALSE),
           checkboxInput("wsd", "Weight Least Squares (--wsd)", FALSE),
-          numericInput("npi", "Plot Intervals (--npi):", 300, min = 100),
+          numericInput("npi", "Plot Intervals (--npi):", par_def$npi, min = 100),
           textInput("sf", "Scaling Factors (--sf):"),
           textInput("nosf", "No Scaling Factors (--nosf):"),
           textInput("sderr", "Species Error SD (--sderr):"),
-          numericInput("fsd", "SD Factor for Plot (--fsd):", 2, min = 0),
+          numericInput("fsd", "SD Factor for Plot (--fsd):", par_def$fsd, min = 0),
           checkboxInput("regular_grid", "Use Regular Grid (--regular_grid)", TRUE),
-          textInput("pch", "Plot Character (--pch):", ".")
+          textInput("pch", "Plot Character (--pch):", par_def$pch)
         ),
         hr(),
         actionButton("run", "Run"),
@@ -1069,9 +1070,22 @@ gui=function() {
         uiOutput("pdf_view"),
         selectInput("tsv_select", "Select TSV:", choices = NULL),
         tableOutput("tsv_table"),
-        downloadButton("downloadZip", label = "Download Zip archive")
+        downloadButton("downloadZip", label = "Download Zip archive"),
+        p(),
+        p("Date: ", textOutput("date", inline=TRUE), style="font-size: x-small"),
+        p("Call in Unix shell: ", style="font-size: x-small",
+        span(textOutput("call", inline=TRUE), style="font-family: monospace")),
+        p("R call: ", style="font-size: x-small",
+        span(textOutput("callr", inline=TRUE), style="font-family: monospace"))
       )
-    )
+    ),
+    tags$script(
+      "Shiny.addCustomMessageHandler('gotop', function(mes) {
+           window.scrollTo(0,0);
+           //console.log(mes)
+        });"
+    ),
+    NULL
   )
 
   server <- function(input, output, session) {
@@ -1082,30 +1096,30 @@ gui=function() {
     shinyFileChoose(input, "load_params", roots = volumes, session = session, defaultPath = wd)
     shinyFileSave(input, "save_params", roots = volumes, session=session, defaultPath = wd)
     observeEvent(input$run, {
-      #req(input$meas)
-      #req(input$sto)
+      req(input$meas)
+      req(input$sto)
       args <- c(
         if (!is.null(input$meas)) c("-m", input$meas$datapath),
         if (!is.null(input$sto)) c("-s", input$sto$datapath),
-        "-k", input$knot,
-        "-n", input$norder,
+        if (input$knot != par_def$knot) c("-k", input$knot),
+        if (input$norder != par_def$norder) c("-n", input$norder),
         if (nzchar(input$lna)) c("--lna", input$lna),
         if (!is.null(input$constr)) c("-c", input$constr$datapath),
         if (!is.null(input$atom)) c("-a", input$atom$datapath),
         if (!is.null(input$mono)) c("--mono", input$mono$datapath),
         if (nzchar(input$increasing)) c("--increasing", input$increasing),
         if (nzchar(input$decreasing)) c("--decreasing", input$decreasing),
-        if (!is.na(input$skip)) c("--skip", input$skip),
+        if (input$skip != par_def$skip) c("--skip", input$skip),
         if (input$zip == "TRUE") "--zip",
         if (input$dls == "TRUE") "--dls",
         if (input$wsd == "TRUE") "--wsd",
-        "--npi", input$npi,
+        if (input$npi != par_def$npi) c("--npi", input$npi),
         if (nzchar(input$sf)) c("--sf", input$sf),
         if (nzchar(input$nosf)) c("--nosf", input$nosf),
         if (nzchar(input$sderr)) c("--sderr", input$sderr),
-        "--fsd", input$fsd,
+        if (input$fsd != par_def$fsd) c("--fsd", input$fsd),
         if (input$regular_grid == "FALSE") c("--regular_grid", "FALSE"),
-        if (nzchar(input$pch)) c("--pch", input$pch)
+        if (nzchar(input$pch) && (input$pch != par_def$pch)) c("--pch", input$pch)
       )
       result <- tryCatch({
         withCallingHandlers({
@@ -1122,13 +1136,17 @@ gui=function() {
       tsv_files <- files[grepl("\\.tsv$", files)]
       file.copy(files, temp_dir, overwrite=TRUE)
       if (length(files)) {
+        args_show=sub(input$meas$datapath, input$meas$name, args, fixed=TRUE)
+        args_show=sub(input$sto$datapath, input$sto$name, args_show, fixed=TRUE)
+        output$date <- renderText(format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+        output$call <- renderText(paste0("R --vanilla -e 'dynafluxr::cli()' --args '", paste0(args_show, collapse="' '"), "'"))
+        output$callr <- renderText(paste0("res=dynafluxr::cli(c('", paste0(args_show, collapse="', '"), "'))"))
         updateSelectInput(session, "pdf_select", choices = basename(pdf_files), selected="ispecie.pdf")
         updateSelectInput(session, "tsv_select", choices = basename(tsv_files), selected="stats.tsv")
         output$tsv_table <- renderTable({
-          odir=tools::file_path_sans_ext(input$meas$datapath)
           req(input$tsv_select)
           read.table(file.path(odir, input$tsv_select), header = TRUE, sep = "\t")
-        })
+        }, digits=4)
         output$pdf_view <- renderUI({
           req(input$pdf_select)
           tags$iframe(style = "width:100%; height:800px;", src = paste0("/pdfs/", input$pdf_select))
@@ -1156,6 +1174,7 @@ gui=function() {
           tags$iframe(style = "width:100%; height:0px;", src = "")
         })
       }
+      session$sendCustomMessage(type = "gotop", "gotop: done")
     })
     observeEvent(input$save_params, repeat {
       req(input$save_params)
@@ -1195,5 +1214,5 @@ gui=function() {
     })
     session$onSessionEnded(stopApp)
   }
-  shinyApp(ui, server)
+  shinyApp(ui, server, options=list(launch.browser = TRUE))
 }
