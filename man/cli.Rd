@@ -31,7 +31,7 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   tpp=res$tpp
   # plot species
   matplot(tpp, res$msp(tpp), type="l")
-  matpoints(tp, res$mf[,-1], pch="o", cex=0.5)
+  matpoints(tp, res$mf[,-1], pch=".", cex=0.5)
   legend("topright", legend=colnames(bsppar(res$msp)$qw), lty=1:5, col=1:6, cex=0.75)
   # plot rates
   dev.new()
@@ -40,7 +40,7 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   tf=as.numeric(rownames(ref)) # reference rate time points
   nm_rate=colnames(bsppar(res$vsp)$qw)
   itf=(tf >= min(tp) & tf <= max(tp))
-  matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch="o", cex=0.5)
+  matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch=".", cex=0.5)
   legend("topright", legend=nm_rate, lty=1:5, col=1:6, cex=0.75)
   # plot residuals
   dev.new()

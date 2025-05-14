@@ -57,7 +57,7 @@ nm_lapply=function(X, FUN, ...) {
   stopifnot(length(nms) == length(X))
   setNames(lapply(seq_along(X), function(i) FUN(nms[i], X[[i]], ...)), nms)
 }
-#' sdy for column covariance of \code{qw%*%A}
+#' sdy for column covariance of \code{qw A}
 #' @noRd
 #' @keywords internal
 sdyA=function(sdy, A, transp=FALSE) {
@@ -1022,6 +1022,11 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   }
   res
 }
+
+#' Launch graphical user interface in web browser
+#'
+#' @returns no returned value
+#' @export
 gui=function() {
   pkgs=c("shiny", "shinyFiles", "shinyjs")
   available=sapply(pkgs, requireNamespace, quietly=TRUE)

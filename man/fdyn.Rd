@@ -16,7 +16,9 @@ fdyn(
   npi = 300L,
   wsd = FALSE,
   nmsf = character(0L),
-  tol = 1e-10
+  sderr = NULL,
+  tol = 1e-10,
+  regular_grid = TRUE
 )
 }
 \arguments{
@@ -66,6 +68,8 @@ should be resolved with residuals weighted by a factor of covariance matrix.
 \item{nmsf}{Character vector, list of species for which scaling factor maust be estimated for --dls.}
 
 \item{tol}{Double scalar, tolerance for detecting singular matrices and solving linear systems}
+
+\item{regular_grid}{Logical scalar, use regular knot grid (default: TRUE)}
 }
 \value{
 List with following components:
@@ -74,7 +78,8 @@ List with following components:
   \item{tp:}{ vector of time points for used measurements}
   \item{tpp:}{ vector of time points for plot (fine time resolution)}
   \item{sto:}{ stoichiometric matrix used for fitting}
-  \item{invsto:}{ pseudo-inverse of stoichiometric matrix used in DSL (NULL for ISL)}
+  \item{stofull:}{ stoichiometric matrix before a possible NA elimination}
+  \item{stoinv:}{ pseudo-inverse of sto}
   \item{msp:}{ measured specie spline function}
   \item{vsp:}{ estimated rates spline function}
   \item{fsp:}{ estimated total flux (S*v) spline function}
@@ -89,6 +94,7 @@ List with following components:
   \item{sdrate:}{ matrix of SD values for flux B-spline coefficients, of size (\code{ncoef x nrate})}
   \item{chi2tab:}{ data-frame with chi2-test results}
   \item{sf:}{ named scale factor vector}
+  \item{internal_knot_ref:}{ number of internal knots used for estimation of var_ref}
 }
 }
 \description{

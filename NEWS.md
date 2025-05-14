@@ -1,3 +1,6 @@
+## v0.27.0 2025-05-14
+- exported gui()
+
 ## v0.26.0 2025-05-14
 - added legal information to gui()
 - added error for mono in DLS mode
