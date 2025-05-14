@@ -1,3 +1,8 @@
+## v0.26.0 2025-05-14
+- added legal information to gui()
+- added error for mono in DLS mode
+- gui(): in case of error, results are canceled
+
 ## v0.25.0 2025-04-16
 - added 'date' and a short 'call' for R and Shell (without default params)
 - added scroll to top at the end of calculations

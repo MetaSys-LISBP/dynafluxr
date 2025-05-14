@@ -175,15 +175,15 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     Specie names should be the same as in stoichiometric model. 'Value'
     can be 1 (monotonically increasing); 0 (no constraint); -1 (monotonically decreasing).
     For example, substrates that are only consumed could get more
-    realistic fit if corresponding 'Value' is set to -1. Cf. also options --increasing and --decreasing."
+    realistic fit if corresponding 'Value' is set to -1. Valid only for ILS. Cf. also options --increasing and --decreasing."
       ),
       make_option(c("--increasing"), type="character", default="",
         help="List of coma separated species that are supposed to be monotonously increasing, e.g. '--increasing=LAC,ETOH'. If a specie is present both in file MONO and in this option,
-    this option takes the precedence."
+    this option takes the precedence. Valid only for ILS."
       ),
       make_option(c("--decreasing"), type="character", default="",
         help="List of coma separated species that are supposed to be monotonously decreasing, e.g. '--decreasing=GLC'. If a specie is present both in file MONO and in this option,
-    this option takes the precedence."
+    this option takes the precedence. Valid only for ILS."
       ),
       make_option(c("-o", "--out"), type="character",
         help="Directory (or zip) name to use for result files. By default, measurement name without extension is used. If empty, no results are written to disk (can be useful for programmatic use)."
@@ -195,7 +195,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
         help="Create zip archive with results (default: FALSE)."
       ),
       make_option(c("--dls"), action="store_true", default=FALSE,
-        help="use Differential Least Squares formulation (default: FALSE)"
+        help="use Differential Least Squares formulation (default: FALSE, i.e. Integral Least Squares (ILS) are used.)"
       ),
       make_option(c("--wsd"), action="store_true", default=FALSE,
         help="weight Least Squares by square root of covariance matrix (default: FALSE). Not compatible with under-detremined stoichiometric matrix, i.e. when there are no sufficient specie dynamics measurements."
@@ -613,10 +613,16 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   mono_mf=if (length(monotone) > 1L) monotone[colnames(mf)[-1L]] else monotone
 #browser()
   # estimate var_ref with biggest d2 in variance (for chi2 test)
-  nki_test=seq(max(0L, nki-5L), min(nki+5L, np-2L))
+  control=list(errx=min(dtp[dtp != 0], na.rm=TRUE)/100., trace=0)
+  nki_test=seq(max(0L, nki-5L), min(nki+5L, np-3L))
   var_test=sapply(nki_test, function(k) {
-    #xki=seq(tp[1L], tp[np], length.out=k+2L)[c(-1L,-(k+2L))]
-    s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono_mf, positive=1, lieq=lieq, estSD=FALSE, regular_grid=regular_grid);
+    if (!regular_grid) {
+      xki=bspline::iknots(seq(tp[1L], tp[np], length.out=np),
+        mf, n=nsp, nki=k, lenfit=0L, smooth=TRUE)
+      s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=FALSE, regular_grid=regular_grid)
+    } else {
+      s=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=k, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=FALSE, regular_grid=regular_grid)
+    }
     if (anyNA(bspline::bsppar(s)$qw))
       stop("NA appeared in preliminary spline fits")
     base::colMeans((s(tp)-mf[, -1L, drop=FALSE])**2L, na.rm=TRUE)
@@ -630,10 +636,15 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
 #browser()
 
   # fit measurements
-  control=list(errx=min(dtp[dtp != 0], na.rm=TRUE)/100.)
   #xki=bspline::iknots(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, lenfit=11L)
   #xki=seq(tp[1L], tp[np], length.out=nki+2L)[c(-1L, -(nki+2L))]
-  msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=TRUE, regular_grid=regular_grid)
+  if (!regular_grid) {
+    xki=bspline::iknots(seq(tp[1L], tp[np], length.out=np),
+        mf, n=nsp, nki=nki, lenfit=0L, smooth=TRUE)
+    msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, xki=xki, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=TRUE, regular_grid=regular_grid)
+  } else {
+    msp=bspline::fitsmbsp(tp, mf[, -1L, drop=FALSE], n=nsp, nki=nki, monotone=mono_mf, positive=1, control=control, lieq=lieq, estSD=TRUE, regular_grid=regular_grid)
+  }
 #browser()
   # error on metab's NA
   ina=names(which(apply(bspline::bsppar(msp)$qw, 2, function(vc) anyNA(vc))))
@@ -691,6 +702,25 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(sto))))
     stop("following species were asked with scaling factors but are not measured:\n\t", paste0(nmsf[ibad], collapse="\n\t"))
   i_sf=match(nmsf, colnames(qwd0))
+  # inequalities: qwm >= 0; dm/dt monotone for some metabs
+  if (any(monotone != 0)) {
+    if (length(monotone) == 1L) {
+      mono=setNames(rep(monotone, nmet), rownames(stofull))
+    } else {
+      mono=monotone[rownames(stofull)]
+    }
+    i=names(which(mono > 0))
+    umono=aperm(diag(nrow=nwv)%o%stofull[i,,drop=FALSE], c(1L,3L,2L,4L))
+    dim(umono)=c(nwv*length(i), nwv*nrate)
+    i=names(which(mono < 0))
+    tmp=aperm(diag(nrow=nwv)%o%(-stofull[i,,drop=FALSE]), c(1L,3L,2L,4L))
+    dim(tmp)=c(nwv*length(i), nwv*nrate)
+    umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
+    cmono=double(nrow(umono))
+  } else {
+    umono=NULL
+    cmono=NULL
+  }
   
   x=NULL
   # calculates B-splines coefs for reaction rates -> qwv
@@ -720,25 +750,6 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     dim(jadd)=c(nrow(ima)*nmet, nmet)
     jtot=cbind(jadd, jqw)
     resj=qwm0
-    # inequalities: qwm >= 0; dm/dt monotone for some metabs
-    if (any(monotone != 0)) {
-      if (length(monotone) == 1L) {
-        mono=setNames(rep(monotone, nmet), rownames(sto))
-      } else {
-        mono=monotone[rownames(sto)]
-      }
-      i=names(which(mono > 0))
-      umono=aperm(diag(nrow=nwv)%o%sto[i,,drop=FALSE], c(1L,3L,2L,4L))
-      dim(umono)=c(nwv*length(i), nwv*nrate)
-      i=names(which(mono < 0))
-      tmp=aperm(diag(nrow=nwv)%o%(-sto[i,,drop=FALSE]), c(1L,3L,2L,4L))
-      dim(tmp)=c(nwv*length(i), nwv*nrate)
-      umono=cbind(matrix(0., nrow=nrow(umono)+nrow(tmp), ncol=nmet), rbind(umono, tmp))
-      cmono=double(nrow(umono))
-    } else {
-      umono=NULL
-      cmono=NULL
-    }
     # positivity constraint matrix u is the same as jtot
     u=rbind(jtot, umono)
     co=double(nrow(u))
@@ -853,6 +864,8 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     # differential LS
     # generalized sto inverse
     # prepare chol factor of cov matrix (t(R)%*%R) for weighting
+    if (!is.null(umono))
+      stop("Monotonicity requirement is not compatible with --dls option")
     ## estimate cov of qwd
     dm=bspline::dmat(nrow(parm$qw), parm$xk, parm$n) # diff matrix
     covqwd=tcrossprod(dm%*%parm$covqw, dm)
@@ -1056,7 +1069,7 @@ gui=function() {
           textInput("pch", "Plot Character (--pch):", par_def$pch)
         ),
         hr(),
-        actionButton("run", "Run"),
+        actionButton("run", "Run", icon=icon("bolt")),
         actionButton("stop", "Stop App"),
         hr(),
         #actionButton("save_params", "Save Parameters"),
@@ -1076,7 +1089,58 @@ gui=function() {
         p("Call in Unix shell: ", style="font-size: x-small",
         span(textOutput("call", inline=TRUE), style="font-family: monospace")),
         p("R call: ", style="font-size: x-small",
-        span(textOutput("callr", inline=TRUE), style="font-family: monospace"))
+          span(textOutput("callr", inline=TRUE), style="font-family: monospace")
+        ),
+        verbatimTextOutput("errmes"),
+        div(id="legal", style="font-size: 10px;",
+          tags$base(target="_blank"),
+          p(
+            a(id="alegal", href="javascript: void(0);", onClick="toggle('plegal')", style="text-decoration: none", target="_self", "▶"),
+            strong(" Legal information about DynaFluxR")),
+          p(id="plegal", style="display:none;",
+            "Author: Serguei Sokol, ",
+            a(href="https://www.inrae.fr/", "INRAE"),
+            " / ",
+            a(href="https://www.toulouse-biotechnology-institute.fr/", "TBI"),
+            " / ",
+            a(href="https://www.toulouse-biotechnology-institute.fr/plateformes-plateaux/cellule-mathematiques/", "Mathematics Cell"),
+            br(),
+            "Copyright: 2025 ",
+            a(href="https://www.inrae.fr/", "INRAE"),
+            "/",
+            a(href="https://www.insa-toulouse.fr/", "INSA"),
+            "/",
+            a(href="https://www.cnrs.fr/", "CNRS"),
+            br(),
+            "License: ",
+            a(href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html", "GPL-2"),
+            br(),
+            "Version: ", format(packageVersion("dynafluxr")),
+            br(),
+            "Availability: ",
+            a(href="https://cran.r-project.org/package=dynafluxr", "CRAN package"),
+            br(),
+            "Cite paper: ", a(href="", "Later to come"),
+            br(),
+            "Project home: ",
+            a(href="https://github.com/MetaSys-LISBP/dynafluxr", "DynaFluxR"),
+            br(),
+            "Issue report: ",
+            a(href="https://github.com/MetaSys-LISBP/dynafluxr/issues", "github page")
+          )
+        ),
+        tags$script('function toggle(nm_obj) {
+            var obj=document.getElementById(nm_obj);
+            if (obj.style.display == "block") obj.style.display = "none";
+            else obj.style.display = "block";
+            var alink=document.getElementById(nm_obj.replace("p", "a"));
+            if (alink != undefined) {
+                if (alink.innerHTML == "▼")
+                    alink.innerHTML = "▶";
+                else
+                    alink.innerHTML = "▼";
+            }
+        }')
       )
     ),
     tags$script(
@@ -1127,53 +1191,70 @@ gui=function() {
         }, warning = function(w) {
           showNotification(paste("Warning:", conditionMessage(w)), type = "warning")
         })
-        }, error = function(e) {
-          showNotification(paste("Error:", conditionMessage(e)), type = "error")
+      }, error = function(e) {
+        showNotification(paste("Error:", conditionMessage(e)), type = "error")
+        c("cli_error", conditionMessage(e))
       })
-      odir=tools::file_path_sans_ext(input$meas$datapath)
-      files <- list.files(odir, full.names = TRUE)
-      pdf_files <- files[grepl("\\.pdf$", files)]
-      tsv_files <- files[grepl("\\.tsv$", files)]
-      file.copy(files, temp_dir, overwrite=TRUE)
-      if (length(files)) {
-        args_show=sub(input$meas$datapath, input$meas$name, args, fixed=TRUE)
-        args_show=sub(input$sto$datapath, input$sto$name, args_show, fixed=TRUE)
-        output$date <- renderText(format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
-        output$call <- renderText(paste0("R --vanilla -e 'dynafluxr::cli()' --args '", paste0(args_show, collapse="' '"), "'"))
-        output$callr <- renderText(paste0("res=dynafluxr::cli(c('", paste0(args_show, collapse="', '"), "'))"))
-        updateSelectInput(session, "pdf_select", choices = basename(pdf_files), selected="ispecie.pdf")
-        updateSelectInput(session, "tsv_select", choices = basename(tsv_files), selected="stats.tsv")
-        output$tsv_table <- renderTable({
-          req(input$tsv_select)
-          read.table(file.path(odir, input$tsv_select), header = TRUE, sep = "\t")
-        }, digits=4)
-        output$pdf_view <- renderUI({
-          req(input$pdf_select)
-          tags$iframe(style = "width:100%; height:800px;", src = paste0("/pdfs/", input$pdf_select))
-        })
-        disable("downloadZip")
-        enable("pdf_select")
-        enable("tsv_select")
-      } else {
-        enable("downloadZip")
-        updateSelectInput(session, "pdf_select", choices = character(0L))
-        updateSelectInput(session, "tsv_select", choices = character(0L))
-        disable("pdf_select")
-        disable("tsv_select")
-        output$downloadZip <- downloadHandler(
-          filename = function() {
-            paste0(tools::file_path_sans_ext(input$meas$name), ".zip")
-          },
-          content = function(fname) {
-            file.copy(file.path(dirname(odir), paste0(basename(odir), ".zip")), fname)
-          },
-          contentType = "application/zip"
-        )
+      args_show=sub(input$meas$datapath, input$meas$name, args, fixed=TRUE)
+      args_show=sub(input$sto$datapath, input$sto$name, args_show, fixed=TRUE)
+      output$date <- renderText(format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+      output$call <- renderText(paste0("R --vanilla -e 'dynafluxr::cli()' --args '", paste0(args_show, collapse="' '"), "'"))
+      output$callr <- renderText(paste0("res=dynafluxr::cli(c('", paste0(args_show, collapse="', '"), "'))"))
+
+      if (class(result) == "character" && result[1L] == "cli_error") {
         output$tsv_table <- renderTable(NULL)
         output$pdf_view <- renderUI({
           tags$iframe(style = "width:100%; height:0px;", src = "")
         })
+        updateSelectInput(session, "tsv_select", choices = character(0L))
+        updateSelectInput(session, "pdf_select", choices = character(0L))
+        output$errmes <- renderText(paste0("Error: ", result[2L]))
+      } else {
+        output$errmes <- renderText(NULL)
+        odir=tools::file_path_sans_ext(input$meas$datapath)
+        files <- list.files(odir, full.names = TRUE)
+        pdf_files <- files[grepl("\\.pdf$", files)]
+        tsv_files <- files[grepl("\\.tsv$", files)]
+        file.copy(files, temp_dir, overwrite=TRUE)
+        if (length(files)) {
+          updateSelectInput(session, "pdf_select", choices = basename(pdf_files), selected="ispecie.pdf")
+          updateSelectInput(session, "tsv_select", choices = basename(tsv_files), selected="stats.tsv")
+          output$tsv_table <- renderTable({
+            req(input$tsv_select)
+            read.table(file.path(odir, input$tsv_select), header = TRUE, sep = "\t")
+          }, digits=4)
+          output$pdf_view <- renderUI({
+            req(input$pdf_select)
+            tags$iframe(style = "width:100%; height:800px;", src = paste0("/pdfs/", input$pdf_select))
+          })
+          disable("downloadZip")
+          enable("pdf_select")
+          enable("tsv_select")
+        } else {
+          enable("downloadZip")
+          updateSelectInput(session, "pdf_select", choices = character(0L))
+          updateSelectInput(session, "tsv_select", choices = character(0L))
+          disable("pdf_select")
+          disable("tsv_select")
+          output$downloadZip <- downloadHandler(
+            filename = function() {
+              paste0(tools::file_path_sans_ext(input$meas$name), ".zip")
+            },
+            content = function(fname) {
+              file.copy(file.path(dirname(odir), paste0(basename(odir), ".zip")), fname)
+            },
+            contentType = "application/zip"
+          )
+          output$tsv_table <- renderTable(NULL)
+          output$pdf_view <- renderUI({
+            tags$iframe(style = "width:100%; height:0px;", src = "")
+          })
+        }
       }
+      updateActionButton(inputId = "run",
+                 label = "Run",
+                 icon = icon("bolt"))
+
       session$sendCustomMessage(type = "gotop", "gotop: done")
     })
     observeEvent(input$save_params, repeat {
