@@ -1,3 +1,6 @@
+## v0.28.0 2025-05-21
+- added warning about metabolites in measurements but not in network
+
 ## v0.27.0 2025-05-14
 - exported gui()
 

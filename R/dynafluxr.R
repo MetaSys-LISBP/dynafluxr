@@ -112,7 +112,7 @@ sdyA=function(sdy, A, transp=FALSE) {
 #' @importFrom stats setNames na.omit
 #' @importFrom graphics legend matlines matpoints polygon points lines
 #' @importFrom utils packageVersion
-#' 
+#'
 #' @export
 cli=function(args=commandArgs(trailingOnly=TRUE)) {
   Specie <- Time <- Value <- NULL # to keep 'R CMD check' calm about subset() arguments
@@ -264,9 +264,14 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   #print(c("mf=", colnames(mf)))
   #print(c("sto=", rownames(sto)))
   # put Time in first column
-  mf=cbind(Time=mf[,iti], mf[, intersect(colnames(mf)[-iti], rownames(sto))])
+  mf=cbind(Time=mf[,iti], mf[, -iti, drop=FALSE])
   if (ncol(mf) == 1L)
     stop(sprintf("No valid specie names in '%s'", opt$meas))
+  # check that all metab names in mf are also in sto
+  if (any(ibad <- !colnames(mf)[-1L] %in% rownames(sto))) {
+    warning("cli: following ", sum(ibad), " metabolites are in measurements but not in network. They will be ignored:\n\t", paste0(colnames(mf)[-1L][ibad], collapse="\n\t"))
+      mf=mf[,c(TRUE, !ibad), drop=FALSE]
+  }
   ikeep=rep(TRUE, nrow(mf))
   if (opt$skip > 0L)
     ikeep[seq_len(opt$skip)]=FALSE
@@ -311,7 +316,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     stop("Following species were labeled as NA but are not present in the network:\n\t", paste0(vclose, collapse="\n\t"))
   }
   ina=colnames(mf) %in% lna
- 
+
   # prepare nmsf vector from --sf or --nosf
   nmsf=character(0L)
   if (nchar(opt$sf)) {
@@ -335,7 +340,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
   if (all(rownames(sto) %in% c(nmsf, lna)))
     stop("Scaling factors are requested for all available species which is meaningless. At least one specie must be excluded from --sf list")
   #print(c("opt=", opt))
-  
+
   # prepare sderr
   sderr=double(0L)
   if (nchar(opt$sderr)) {
@@ -354,7 +359,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     if (any(names(sderr) %in% lna))
       sderr=sderr[!names(sderr) %in% lna]
   }
-  
+
   # main call
   res=fdyn(mf[ikeep,!ina], sto, nsp=opt$norder, nki=opt$knot, lieq=lieq[setdiff(names(lieq), lna)], monotone=mono, dls=opt$dls, atomlen=atomlen, npi=opt$npi, wsd=opt$wsd, nmsf=nmsf, sderr=sderr, regular_grid=opt$regular_grid)
   res$mffull=mf
@@ -493,7 +498,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
     } else {
       unlink(file.path(rd, "sf.tsv"))
     }
-    
+
     cat(file=file.path(rd, "Readme.md"), sep="\n",
       "# Retrieving reaction rate dynamics from specie kinetics (dynafluxr results)", "",
       paste0("This is the result files produced by dynafluxr R package (v", utils::packageVersion("dynafluxr"), ") on ", format(Sys.time(), "%Y-%m-%d %H:%M:%S %z (%Z).")), "",
@@ -696,7 +701,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   qwd0=matrix(0., nrow(qwd), nmet)
   colnames(qwd0)=rownames(sto)
   qwd0[,colnames(qwd)]=qwd
-  
+
   nb_sf=length(nmsf)
   sf=setNames(rep(1., nb_sf), nmsf)
   if (nb_sf > 0L && any(ibad <- !(nmsf %in% rownames(sto))))
@@ -721,7 +726,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     umono=NULL
     cmono=NULL
   }
-  
+
   x=NULL
   # calculates B-splines coefs for reaction rates -> qwv
   if (!dls) {
@@ -987,7 +992,7 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
   ei$sdy=sdyd
   ei$sdqw=sdi
   pari=bspline::bsppar(isp)
-  
+
   # residuals dm/dt-sto*f
   rsp=bspline::par2bsp(nsp-1L, qwd0-qwde[,colnames(qwd0)], pard$xk)
   # integrated residuals m-\int sto*f
@@ -1295,7 +1300,7 @@ gui=function() {
       updateTextInput(session, "pch", value = params["pch", "Value"])
       break
     })
-    observeEvent(input$stop, {      
+    observeEvent(input$stop, {
       stopApp()
     })
     session$onSessionEnded(stopApp)
