@@ -1,3 +1,6 @@
+## v1.0.0 2025-07-01
+- first public release on CRAN
+
 ## v0.28.0 2025-05-21
 - added warning about metabolites in measurements but not in network
 

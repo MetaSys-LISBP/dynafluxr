@@ -1,34 +1,34 @@
 Package: dynafluxr
 Type: Package
-Title: Retrieve Reaction Rate Dynamics from Time-Series Measurements of
-        Specie Concentrations
-Version: 0.28.0
+Title: Retrieve Reaction Rate Dynamics from Metabolite Concentration Time Courses
+Version: 1.0.0
 Authors@R: person(given = "Serguei",
                     family = "Sokol",
                     role = c("aut", "cre"),
                     email = "sokol@insa-toulouse.fr")
-Description: Reaction rate dynamics can be retrieved from time-series measurements
-  of chemical species and/or their isotopes. User has to provide
-  corresponding stoechiometric
+Description: Reaction rate dynamics can be retrieved from metabolite
+  concentration time courses. User has to provide corresponding stoichiometric
   matrix but not a regulation model (Michaelis-Menten or similar).
   Instead of solving an ODE system describing the evolution of concentrations,
   we use B-splines to catch the concentration and rate dynamics then
-  solve a least square problem on their coefficients with positivity
-  (and optionaly monotonicity) constraints.
+  solve a least square problem on their coefficients with non-negativity
+  (and optionally monotonicity) constraints.
   Constraints can be also set on initial values of concentration.
   The package 'dynafluxr' can be used as a library but also as
-  an application with command line interface.
+  an application with command line interface 'dynafluxr::cli("-h")' or graphical user interface 'dynafluxr::gui()'.
 License: GPL-2
 Encoding: UTF-8
-Depends: bspline, nlsic
+Depends: bspline (>= 2.5.0), nlsic (>= 1.1.1)
 Imports: 
     optparse,
     qpdf,
     arrApply,
     slam,
-    grDevices,
-    gmresls (>= 0.2)
+    gmresls (>= 0.2),
+    shiny,
+    shinyjs,
+    shinyFiles
 RoxygenNote: 7.3.2
-Suggests: RUnit, knitr, shiny, shinyjs, shinyFiles
+Suggests: RUnit, knitr
 VignetteBuilder: knitr
 NeedsCompilation: no

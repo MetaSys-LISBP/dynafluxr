@@ -23,9 +23,9 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
 
   # from R session
   ddir=system.file("dataglyco", package="dynafluxr")
-  meas=file.path(ddir, "data_teusink.tsv")
-  sto=file.path(ddir, "network_teusink.txt")
-  res=cli(c("-m", meas, "-s", sto, "--skip", "10", "-o", ""))
+  meas=file.path(ddir, "data.tsv")
+  sto=file.path(ddir, "network.txt")
+  res=cli(c("-m", meas, "-s", sto, "--skip", "24", "-o", ""))
   tp=res$tp
   np=length(tp)
   tpp=res$tpp
@@ -36,12 +36,6 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   # plot rates
   dev.new()
   matplot(tpp, res$vsp(tpp), type="l")
-  ref=t(read.delim(file.path(ddir, "glyco_teusink.flux.tsv"), row.names=1, check.names=FALSE))
-  tf=as.numeric(rownames(ref)) # reference rate time points
-  nm_rate=colnames(bsppar(res$vsp)$qw)
-  itf=(tf >= min(tp) & tf <= max(tp))
-  matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch=".", cex=0.5)
-  legend("topright", legend=nm_rate, lty=1:5, col=1:6, cex=0.75)
   # plot residuals
   dev.new()
   matplot(tpp, res$risp(tpp), type="l")

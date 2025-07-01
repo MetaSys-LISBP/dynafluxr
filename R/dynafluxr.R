@@ -81,9 +81,9 @@ sdyA=function(sdy, A, transp=FALSE) {
 #'
 #'   # from R session
 #'   ddir=system.file("dataglyco", package="dynafluxr")
-#'   meas=file.path(ddir, "data_teusink.tsv")
-#'   sto=file.path(ddir, "network_teusink.txt")
-#'   res=cli(c("-m", meas, "-s", sto, "--skip", "10", "-o", ""))
+#'   meas=file.path(ddir, "data.tsv")
+#'   sto=file.path(ddir, "network.txt")
+#'   res=cli(c("-m", meas, "-s", sto, "--skip", "24", "-o", ""))
 #'   tp=res$tp
 #'   np=length(tp)
 #'   tpp=res$tpp
@@ -94,12 +94,6 @@ sdyA=function(sdy, A, transp=FALSE) {
 #'   # plot rates
 #'   dev.new()
 #'   matplot(tpp, res$vsp(tpp), type="l")
-#'   ref=t(read.delim(file.path(ddir, "glyco_teusink.flux.tsv"), row.names=1, check.names=FALSE))
-#'   tf=as.numeric(rownames(ref)) # reference rate time points
-#'   nm_rate=colnames(bsppar(res$vsp)$qw)
-#'   itf=(tf >= min(tp) & tf <= max(tp))
-#'   matpoints(tf[itf], ref[itf, nm_rate, drop=FALSE], pch=".", cex=0.5)
-#'   legend("topright", legend=nm_rate, lty=1:5, col=1:6, cex=0.75)
 #'   # plot residuals
 #'   dev.new()
 #'   matplot(tpp, res$risp(tpp), type="l")
@@ -565,6 +559,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #'   should be resolved with residuals weighted by a factor of covariance matrix.
 #'   (default FALSE, i.e. no weighting is used)
 #' @param nmsf Character vector, list of species for which scaling factor maust be estimated for --dls.
+#' @param sderr Numeric vector, use this SD of measured metabolites instead of automatically estimated. The name of each vector component is metabolite name, tha value is SD vale, e.g. \code{c(GLC=0.1)} (default NULL, i.e. SD are automatically estimated).
 #' @param tol Double scalar, tolerance for detecting singular matrices and solving linear systems
 #' @param regular_grid Logical scalar, use regular knot grid (default: TRUE)
 #' @details
@@ -603,6 +598,7 @@ cli=function(args=commandArgs(trailingOnly=TRUE)) {
 #' @importFrom arrApply arrApply
 #' @importFrom stats var pchisq
 #' @importFrom nlsic lsi
+#' @importFrom utils head read.table tail
 #' @export
 fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
     atomlen=NULL, npi=300L, wsd=FALSE, nmsf=character(0L), sderr=NULL, tol=1.e-10, regular_grid=TRUE) {
@@ -1032,14 +1028,10 @@ fdyn=function(mf, stofull, nsp=4L, nki=5L, lieq=NULL, monotone=0, dls=FALSE,
 #'
 #' @returns no returned value
 #' @export
+#' @rawNamespace import(shiny, except = runExample)
+#' @rawNamespace import(shinyjs, except = runExample)
+#' @import shinyFiles
 gui=function() {
-  pkgs=c("shiny", "shinyFiles", "shinyjs")
-  available=sapply(pkgs, requireNamespace, quietly=TRUE)
-  if (any(!available))
-    stop("Following R packages are necessary for GUI running. Install them first:\n\t", paste0(pkgs[!available], collapse="\n\t"))
-  library(shiny)
-  library(shinyFiles)
-  library(shinyjs)
   inp2val=function(input)
     sapply(nm_par, function(nm) as.character(input[[nm]]))
 
@@ -1105,7 +1097,7 @@ gui=function() {
         div(id="legal", style="font-size: 10px;",
           tags$base(target="_blank"),
           p(
-            a(id="alegal", href="javascript: void(0);", onClick="toggle('plegal')", style="text-decoration: none", target="_self", "▶"),
+            a(id="alegal", href="javascript: void(0);", onClick="toggle('plegal')", style="text-decoration: none", target="_self", "\u25b6"),
             strong(" Legal information about DynaFluxR")),
           p(id="plegal", style="display:none;",
             "Author: Serguei Sokol, ",
@@ -1145,10 +1137,10 @@ gui=function() {
             else obj.style.display = "block";
             var alink=document.getElementById(nm_obj.replace("p", "a"));
             if (alink != undefined) {
-                if (alink.innerHTML == "▼")
-                    alink.innerHTML = "▶";
+                if (alink.innerHTML == String.fromCharCode(9660))
+                    alink.innerHTML = String.fromCharCode(9654); // roght triangle
                 else
-                    alink.innerHTML = "▼";
+                    alink.innerHTML = String.fromCharCode(9660); // down triangle
             }
         }')
       )
@@ -1211,7 +1203,7 @@ gui=function() {
       output$call <- renderText(paste0("R --vanilla -e 'dynafluxr::cli()' --args '", paste0(args_show, collapse="' '"), "'"))
       output$callr <- renderText(paste0("res=dynafluxr::cli(c('", paste0(args_show, collapse="', '"), "'))"))
 
-      if (class(result) == "character" && result[1L] == "cli_error") {
+      if (inherits(result, "character") && result[1L] == "cli_error") {
         output$tsv_table <- renderTable(NULL)
         output$pdf_view <- renderUI({
           tags$iframe(style = "width:100%; height:0px;", src = "")
@@ -1261,9 +1253,9 @@ gui=function() {
           })
         }
       }
-      updateActionButton(inputId = "run",
-                 label = "Run",
-                 icon = icon("bolt"))
+      #updateActionButton(inputId = "run",
+      #           label = "Run",
+      #           icon = icon("bolt"))
 
       session$sendCustomMessage(type = "gotop", "gotop: done")
     })

@@ -1,9 +1,9 @@
 ---
-title: "Metabolic Flux Dynamics in Glycolysis with `dynafluxr`"
+title: "Metabolic Flux Dynamics in Upper Glycolysis with `dynafluxr`"
 output: rmarkdown::html_vignette
 author:
   - "Serguei Sokol^[TBI, Université de Toulouse, CNRS, INRAE, INSA, Toulouse, France] ^[MetaboHUB, National Infrastructure of Metabolomics and Fluxomics, Toulouse 31077, France]"
-date: 2022-11-28
+date: 2025-06-27
 vignette: >
   %\VignetteIndexEntry{glyco}
   %\VignetteEngine{knitr::knitr}
@@ -21,17 +21,22 @@ knitr::opts_chunk$set(
 
 ```{r setup}
 library(dynafluxr)
+#pkgload::load_all("~/projs/dynafluxr/dev/dynafluxr")
 ```
 ## Introduction
 
-This vignette shows how `dynafluxr` R package can be used to unravel metabolic flux dynamics from metabolite time-series measurements and a stoichiometric model. No regulation model (like Michaelis-Menten) is required for this task. Our method is heavily relying on B-splines as implemented in `bspline` package. We show how to prepare measurement data, edit stoichiometric reactions, use various package options and interpret/exploit the results. The data used for this vignette were obtained by NMR measurements on MetaToul-FluxoMet platform, Toulouse Biotechnology Institute (TBI), Toulouse, France. Credits for making these data available go to Pauline Rouane, Cyril Charlier, Guy Lippens. Pierre Millard has shared stoichiometric model. All cited persons are from TBI.
+This vignette shows how `dynafluxr` R package can be used to unravel metabolic flux dynamics from metabolite concentration time courses and a stoichiometric model. No regulation model (like Michaelis-Menten) is required for this task. Our method is heavily relying on B-splines as implemented in `bspline` package. We show how to prepare measurement data, edit stoichiometric reactions, use various package options and interpret/exploit the results.
+Even if graphical user interface (GUI) cans be called and used with function `gui()`, this vignette is focused on command line interface (CLI) which is more suitable for reproducible research and automation. The CLI can be used from R or from a shell environment.
+
+The data used for this vignette were obtained by NMR measurements on MetaToul-FluxoMet platform, Toulouse Biotechnology Institute (TBI), Toulouse, France. Credits for making these data available go to Svetlana Dubiley, Pauline Rouane, Cyril Charlier, Guy Lippens and Pierre Millard. Pierre Millard has also shared stoichiometric model and supervised the whole project. All cited persons are (or were at the moment of the project) from TBI.
+The case presented in this vignette is also presented in an article entitled "Estimating flux dynamics from metabolite concentration time courses with dynafluxr" by Serguei Sokol, Svetlana Dubiley, Pauline Rouane, Cyril Charlier, Guy Lippens, and Pierre Millard.
 
 ## Data preparations
 
 Data must be stored in a `.tsv` (Tabulation Separated Values) file (`.tsv` extension is not mandatory, it can be `.txt`, `.csv`, whatever, but the field separator must be the tabulation character), one column per chemical specie. The first row describes column names. Time points, at which measurements are done, must be stored in a column whose name starts with 'Time'. No specie name can start with 'Time'. Decimal separator must be a point `.` character. A head of data file used as an example is looking like
 
 ```{r}
-fmeas=system.file("dataglyco/data_PRO.tsv", package="dynafluxr")
+fmeas=system.file("dataglyco/data.tsv", package="dynafluxr")
 cat(head(readLines(fmeas)), sep="\n")
 ```
 
@@ -44,10 +49,10 @@ print(head(mf))
 
 The reactions are written as in following example:
 ```{r}
-fsto=system.file("dataglyco/network_PRO.txt", package="dynafluxr")
-cat(head(readLines(fsto)), sep="\n")
+fsto=system.file("dataglyco/network.txt", package="dynafluxr")
+cat(readLines(fsto), sep="\n")
 ```
-The first field separated by tabulation is a reaction name then reaction itself where species are separated by " + " sign and possibly preceded by a stoichiometric coefficient with " * " symbol.
+The first field separated by tabulation is a reaction name then reaction itself where species are separated by "&nbsp;+&nbsp;" sign and possibly preceded by a stoichiometric coefficient with "&nbsp;\*&nbsp;" symbol, e.g. `2*NAD`. The symbol "\*" is manadtory as a metabolite name can start with a number, e.g. `3PG` is a molecule of 3-phosphoglycerate and not `3 * PG`. The reaction can also be a degradation or washing out one, e.g. `A ->` which means that A is degraded to nothing or transported outside of the considered system. The reaction can also be a synthesis one, e.g. `-> A` which means that A is synthesized from nothing or brought from external environment.
 
 We start by gathering example files in a freshly created working directory, say `glyco/`:
 ```{r}
@@ -58,75 +63,46 @@ file.copy(c(fmeas, fsto), "glyco/")
 
 Let fit available data with B-splines of order 4 and with 5 internal knots (default in `dynafluxr`), then plot them to have an idea how data looks like:
 ```{r}
-fmeas="glyco/data_PRO.tsv"
+fmeas="glyco/data.tsv"
 mf=read.delim(fmeas, comment.char="#")
 nm=colnames(mf)[-1L]
 msp=fitsmbsp(mf$Time, mf[, nm], n=4, nki=5)
-matplot(mf$Time, msp(mf$Time), t="l", ylab="Concentration [mM]", xlab="Time [s]")
-matpoints(mf$Time, mf[, nm], pch="o", cex=0.5)
-legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75)
+matplot(mf$Time, msp(mf$Time), t="l", ylab="Concentration [mM]", xlab="Time [min]", lwd=2)
+coltr=apply(col2rgb(1:6)/255, 2, function(v) do.call(rgb, c(as.list(v), alpha=0.25)))
+matpoints(mf$Time, mf[, nm], pch="o", cex=0.75, col=coltr)
+legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75, lwd=2)
 ```
 
-We see that glucose (GLC) is going too close to 0, maybe even getting negative. A closer look confirms this (negative values are plotted in blue):
-```{r}
-ineg=msp(mf$Time, "GLC") < 0
-matplot(mf$Time[!ineg], msp(mf$Time, "GLC")[!ineg], t="l", ylab="C", xlab="Time", main="GLC")
-abline(h=0)
-matplot(mf$Time[ineg], msp(mf$Time, "GLC")[ineg], t="l", col="blue", lwd=2, add=TRUE)
-matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
-```
+Data treatment can make that measured concentration are getting negative.
 
-As concentrations cannot get negative values by definition, we constraint B-splines to non negative values with option `positive=1`
-```{r}
-msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive=1)
-ineg=msp(mf$Time, "GLC") < 0
-print(sum(ineg))
-matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="Time", main="GLC")
-abline(h=0)
-matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
-```
+As concentrations cannot get negative by definition, `dynafluxr` constraints B-splines to non negative values.
+Another non desirable effect can be that consumed metabolite is sometimes increasing which has no physical meaning. In our case, Glucose is only consumed so in `dynafluxr`, it can be signaled in options `--decresing` while `--increasing` is reserved for accumulated products like FBP. All options can be abbreviated till unambiguous prefix, e.g. `--decr` for `--decreasing`.
 
-Negative values have disappeared but at the end of time interval, around 300 s, GLC curve is increasing which has no physical meaning. Glucose is only consumed in this experimental setup. Fortunately, we can constraint B-splines to be monotonously decreasing for GLC:
-
-```{r, fig.width=6, fig.height=4}
-vmono=rep(0, length(nm))
-vmono[match("GLC",nm)]=-1
-msp=fitsmbsp(mf$Time, mf[,-1], n=4, nki=5, positive = 1, monotone = vmono)
-matplot(mf$Time, msp(mf$Time, "GLC"), t="l", ylab="C", xlab="Time", main="GLC")
-matpoints(mf$Time, mf[,"GLC"], pch="o", cex=0.5)
-```
-
-Looks good now. In `dynafluxr`, we have no option to constraint B-splines to non negative values, because it is done automatically. On the other hand, we do need to indicate which specie is supposed to be monotonously decreasing or increasing. It can be be done with `--mono MONO` option where `MONO` is a file name appropriately formatted to indicate which metabolite is increasing and which is decreasing. It can also be done with options `--incresing` and `--decreasing` with corresponding coma separated lists of specie names. It is this last option that we will use with `dynafluxr` but for now, let check some other metabolites, e.g. pyruvate (PYR) to be sure that the fit looks good too:
-```{r, fig.width=6, fig.height=4}
-matplot(mf$Time, msp(mf$Time, "PYR"), t="l", ylab="C", xlab="Time", main="PYR")
-matpoints(mf$Time, mf[,"PYR"], pch="o", cex=0.5)
-```
-
-Looks OK, so we are set to move to the next step.
+We can see also in the previous plot that FBP has non zero values at the beginning of the experiment. To skip these nonphysical data, we can use an option `--skip` which indicates the number of first time points to skip. In our case, we will skip 24 first time points.
 
 ## First estimate of fluxes with `dynafluxr`
 
-We try `dynafluxr::cli()` (Command Line Interface) function with minimal options, just indicating measurement data, stoichiometric model and, as seen before, that GLC must be monotonously decreasing (`--decreasing` is abbreviated to `--decr`):
+We try `dynafluxr::cli()` (Command Line Interface) function with minimal options, just indicating measurement data, stoichiometric model and, as seen before, that GLC/FBP must be monotonously decreasing/increasing respectively and that 24 first time points must be skipped. The `cli()` function is the main entry point to `dynafluxr` package and it can be used from R or from a shell environment. It is a wrapper around `dynafluxr::fdyn()` function which does the real work of flux estimation.
 
 ```{r}
-res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC"))
+res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24"))
 ```
 
 The same command could be run from a shell (not R) environment. In this case it would look like:
 
 ```
-$ Rscript -e "dynafluxr::cli()" -m glyco/data_PRO.tsv -s glyco/network_PRO.txt --decr GLC
+$ Rscript -e "dynafluxr::cli()" -m glyco/data.tsv -s glyco/network.txt --decr GLC --incr FBP --skip 24
 ```
-
-The full list of available options can be viewed with `dynafluxr::cli("-h")` command. The result of `cli()` function (in case of no error in run-time), is a series of data and pdf files written in a directory `glyco/data_PRO` which is the stump of measurement data file:
+The `cli()` function accepts a vector of command line arguments. The first argument is `-m` or `--meas` which indicates the measurement data file, then `-s` or `--stoich` for stoichiometric model file, then options for decreasing and increasing species, skipping time points and so on. The result of the function is a list with several elements.
+The full list of available options can be viewed with `dynafluxr::cli("-h")` command. The result of `cli()` function (in case of no error in run-time), is a series of data and pdf files written in a directory `glyco/data` which is the base name of measurement data file:
 
 ```{r}
-list.files("glyco/data_PRO/")
+list.files("glyco/data/")
 ```
 
 The file `Readme.md` describes the content of the result directory. These files can be explored by system tools like pdf-viewers and spreadsheet software but for needs of this vignette we will reproduce some results by R means. As we won't need result files in this demo page, we'll cancel their writing with empty option `-o ""` which normally indicates result directory/archive name if it is different from the default one:
 ```{r}
-res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", ""))
+res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24", "-o", ""))
 ```
 
 Let now glance on fit quality, i.e. results of $\chi^2$-test:
@@ -134,133 +110,48 @@ Let now glance on fit quality, i.e. results of $\chi^2$-test:
 print(res$chi2tab)
 ```
 
-We can see that all $p$-values are 0 which means a very poor fit quality. Let see what is going on by plotting integrated species with measurements:
+We can see that $p$-values are almost 0 for G6P and FBP which usually means a poor fit quality. Let see what is going on by plotting integrated species with measurements:
 
 ```{r}
 nm=colnames(res$mf)[-1]
-matplot(res$tpp, res$isp(res$tpp, nm), t="l", xlab="Time", ylab="C")
-matpoints(res$tp, res$mf[,nm], pch="o", cex=0.5)
-legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75)
+matplot(res$tpp, res$isp(res$tpp, nm), t="l", xlab="Time [min]", ylab="Concentration [mM]", lwd=2)
+matpoints(res$tp, res$mf[,nm], pch="o", cex=0.5, col=coltr)
+legend("topright", legend=nm, lty=1:5, col=1:6, cex=0.75, lwd=2)
 ```
 
-Indeed, for all species, integrated curves are not fitting well the corresponding data. We take a closer look on pyruvate (PYR) which is buried in the full graph:
-```{r}
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR))
-points(res$tp, res$mf$PYR, pch="o", cex=0.5)
-```
-We will use PYR example for tracking the fit quality as fit options change.
+For a human eye is does not look bad but for a computer, it is not good enough. The problem is that the uses underestimated reference variance visible in the column `RefVar` of the $\chi^2$-test table.
 
 ## Getting fit better
 
-Let see the integral residual of metabolites which are not measured and thus are supposed to be close to 0:
+The reference variance is used to estimate the noise in measurements and it is used to weight the residuals in least squares. If it is underestimated, the residuals are too large and the fit is considered as poor. The reference variance can be estimated automatically like it was done till now. But It can also be set to a some  more realistic value manually. In our case, we can set it to from 0.05 mM$^2$ to 0.1 mM$^2$ which are reasonable values for NMR measurements. This can be done with `--sderr` option: `--sderr=GLC=0.05,G6P=0.05,FBP=0.1,F6P=0.05`
 
+From experiment setup, we know that FBP and F6P are not measured in absolute concentration as there is a doubt about proton attribution in the measured signal. Let apply scaling factors to FBP and F6P:
 ```{r}
-nmall=rownames(res$sto)
-nm=colnames(res$mf)[-1L]
-nm0=setdiff(nmall, nm)
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
-legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
-```
-
-We can see that the most diverging metabolites are fructose bi-phosphate (FBP) and fructose-6-phosphate (F6P). We can try to declare them as not available (NA) thus they won't degrade least-squares objective function with its diverging from 0 residuals:
-```{r}
-res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P"))
-nmall=rownames(res$sto)
-nm=colnames(res$mf)[-1L]
-nm0=setdiff(nmall, nm)
-layout(t(1:2))
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
-legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR), main="PYR")
-points(res$tp, res$mf$PYR, pch="o", cex=0.5)
-```
-There is some progress in fit quality but PYR is still not well fitted. We try to add next diverging metabolites to NA: BPG (a little bit buried in the plot) and ACCOA.
-```{r}
-res=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA"))
-nmall=rownames(res$sto)
-nm=colnames(res$mf)[-1L]
-nm0=setdiff(nmall, nm)
-layout(t(1:2))
-matplot(res$tpp, res$risp(res$tpp, nm0), t="l", ylab="M-\u222bSv dt", xlab="Time")
-legend("topright", legend=nm0, lty=1:5, col=1:6, cex=0.75)
-plot(res$tpp, res$isp(res$tpp, "PYR"), t="l", xlab="Time", ylab="C", ylim=range(res$mf$PYR), main="PYR")
-points(res$tp, res$mf$PYR, pch="o", cex=0.5)
-```
-
-Now, residuals for "0" metabolites are all very close to 0 which means that they are not degrading least squares anymore and PYR is very well fitted. A good overall fit is confirmed by $\chi^2$-test:
-```{r}
+res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24", "--sf=FBP,F6P", "-o", "", "--sderr=GLC=0.05,G6P=0.05,FBP=0.1,F6P=0.05"))
 print(res$chi2tab)
 ```
 
-as all $p$-values are well above 0.05 usual threshold.
+Now, all $p$-values are well above 0.05 usual threshold.
+
+## Exploring results
+
 We are ready to see the main result: estimated reaction rates.
 ```{r}
-matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="Time")
-legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
-```
-It can be observed some oscillations in reaction rates and we must check if they don't come from a possible overfitting.
-
-## Exploring problem of overfitting
-
-By default, the number of internal knots used for fitting is 5. Let try few values under and above (1 to 6) and see if the measurements are still well fitted. We will continue to use PYR for this purpose:
-```{r}
-layout(matrix(1:6, nrow=2, byrow=TRUE))
-resk=lapply(1:6, function(k) {
-  r=cli(c("-m", "glyco/data_PRO.tsv", "-s", "glyco/network_PRO.txt", "--decr", "GLC", "-o", "", "--lna", "FBP,F6P,BPG,ACCOA", "-k", k))
-  plot(r$tpp, r$isp(r$tpp, "PYR"), main=paste0("PYR k=",k,sep=""), ylab="C", xlab="Time", t="l")
-  points(r$tp, r$mf$PYR, pch="o", cex=0.5)
-  r
-})
-```
-Starting from value `k=3`, the fits look satisfactory. Let see what says $\chi^2$ test:
-```{r}
-for (k in 1:6) {
-  cat("k=",k,"\n")
-  print(resk[[k]]$chi2tab)
-}
-```
-We can see that $p$-value is above 0.05 for all metabolites only for k=5. We will retain this value as giving the best fit.
-
-The total data fit for k=5 looks like:
-```{r}
-res=resk[[5L]]
-nm=colnames(res$mf)[-1L]
-matplot(res$tpp, res$isp(res$tpp, nm), t="l")
-matpoints(res$tp, res$mf[,nm], pch="o", cex=0.5)
-legend("topright", legend=nm, lty=1:5, col=1:6)
-```
-and reaction rates:
-```{r}
-matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/s]", xlab="Time")
-legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75)
-```
-The curve oscillations are present for some fluxes but as seen before and based on $\chi^2$ test, in this case, it is not due to overfitting but reflects system behavior through measured data.
-
-In the result files, the rates are plotted with semi-transparent error bands ±2·SD. Let do it here too:
-```{r}
-nmreac=colnames(res$sto)
-matplot(res$tpp, res$vsp(res$tpp, nmreac), t="l", ylab="Rate [1/s]", xlab="Time")
-tppr=c(res$tpp, rev(res$tpp))
-ireac=0
-for (reac in nmreac) {
-  vp=res$vsp(res$tpp, reac, fsd=2)
-  vm=rev(res$vsp(res$tpp, reac, fsd=-2))
-  polygon(tppr, c(vp, vm), border=NA, col=do.call(rgb, as.list(c(col2rgb(ireac%%6+1)/255, 0.3))))
-  ireac=ireac+1
-}
-legend("topright", nmreac, lty=1:5, col=1:6, cex=0.75)
+matplot(res$tpp, res$vsp(res$tpp), t="l", ylab="Rate [1/min]", xlab="Time [min]", lwd=2)
+legend("topright", colnames(bsppar(res$vsp)$qw), lty=1:5, col=1:6, cex=0.75, lwd=2)
 ```
 
-Having estimated rates, we can now explore details of metabolic fluxes. Not only we have the total flux $\frac{dM_i}{dt}$ but also all its components coming from involved reactions $S_{ij}v_j$. For PYR, it gives:
+Having estimated rates, we can now explore details of metabolic fluxes. Not only we have the total flux $\frac{dM_i}{dt}$ but also all its components coming from involved reactions $S_{ij}v_j$. For G6P, it gives:
 ```{r}
-nm="PYR"
-jnz=names(which(res$stofull[nm,] != 0)) # non-zero coeffs, i.e. reactions involved in PYR mass balance
+nm="G6P"
+jnz=names(which(res$stofull[nm,] != 0)) # non-zero coeffs, i.e. reactions involved in G6P mass balance
 fl=t(res$stofull[nm,jnz]*t(res$vsp(res$tpp, jnz))) # each rate v_j is multiplied by S_ij
 fl=cbind(res$fsp(res$tpp, nm), fl) # add total flux
-matplot(res$tpp, fl, t="l", ylab="Flux [mM/s]", xlab="Time [s]", main="PYR flux components")
-legend("topright", legend=c("Total", jnz), lty=1:5, col=1:6)
+matplot(res$tpp, fl, t="l", ylab="Flux [mM/min]", xlab="Time [min]", main="G6P flux components", lwd=2)
+abline(h=0)
+legend("topright", legend=c("Total", jnz), lty=1:5, col=1:6, lwd=2)
 ```
 
 ## Conclusion
 
-In this vignette, we have shown a step-by-step procedure for reaction rate estimation from time-series metabolite measurements and a stoichiometric model. We have seen how package parameters can be chosen, how fit quality can be evaluated and how data can be presented and exploited. Based on this vignette, user should be ready to work with his own data set and stoichiometric model.
+In this vignette, we have shown a step-by-step procedure for reaction rate estimation from metabolite concentration time courses and a stoichiometric model. We have seen how package parameters can be chosen, how fit quality can be evaluated and how data can be presented and exploited. Based on this vignette, user should be ready to start working with his own data set and stoichiometric model.

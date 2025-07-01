@@ -67,6 +67,8 @@ should be resolved with residuals weighted by a factor of covariance matrix.
 
 \item{nmsf}{Character vector, list of species for which scaling factor maust be estimated for --dls.}
 
+\item{sderr}{Numeric vector, use this SD of measured metabolites instead of automatically estimated. The name of each vector component is metabolite name, tha value is SD vale, e.g. \code{c(GLC=0.1)} (default NULL, i.e. SD are automatically estimated).}
+
 \item{tol}{Double scalar, tolerance for detecting singular matrices and solving linear systems}
 
 \item{regular_grid}{Logical scalar, use regular knot grid (default: TRUE)}

@@ -1,0 +1,3 @@
+HXK	GLC + ATP -> G6P + ADP
+PGI	G6P -> F6P
+PFK	F6P + ATP -> FBP + ADP
