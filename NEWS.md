@@ -1,3 +1,6 @@
+## v1.0.1 2025-07-07
+- corrections for public release on CRAN
+
 ## v1.0.0 2025-07-01
 - first public release on CRAN
 

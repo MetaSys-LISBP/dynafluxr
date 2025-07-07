@@ -10,6 +10,9 @@ cli(args = commandArgs(trailingOnly = TRUE))
 \item{args}{Character vector, command line parameters (default
 \code{commandArgs(trailingOnly=TRUE)})}
 }
+\value{
+a list resulting from \code{fdyn()} call
+}
 \description{
 Function to be called from shell command line
 }
@@ -40,4 +43,7 @@ run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
   dev.new()
   matplot(tpp, res$risp(tpp), type="l")
   legend("topright", legend=colnames(bsppar(res$rsp)$qw), lty=1:5, col=1:6, cex=0.75)
+}
+\seealso{
+fdyn
 }

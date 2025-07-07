@@ -72,6 +72,8 @@ sdyA=function(sdy, A, transp=FALSE) {
 #'
 #' @param args Character vector, command line parameters (default
 #'   \code{commandArgs(trailingOnly=TRUE)})
+#' @return a list resulting from \code{fdyn()} call
+#' @seealso fdyn
 #' @details
 #'   run \code{cli("-h")} in R or \code{Rscript -e 'dynafluxr::cli()' -h}
 #'   in shell to get a help page with available option description

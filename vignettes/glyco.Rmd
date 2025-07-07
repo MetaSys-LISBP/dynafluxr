@@ -54,16 +54,18 @@ cat(readLines(fsto), sep="\n")
 ```
 The first field separated by tabulation is a reaction name then reaction itself where species are separated by "&nbsp;+&nbsp;" sign and possibly preceded by a stoichiometric coefficient with "&nbsp;\*&nbsp;" symbol, e.g. `2*NAD`. The symbol "\*" is manadtory as a metabolite name can start with a number, e.g. `3PG` is a molecule of 3-phosphoglycerate and not `3 * PG`. The reaction can also be a degradation or washing out one, e.g. `A ->` which means that A is degraded to nothing or transported outside of the considered system. The reaction can also be a synthesis one, e.g. `-> A` which means that A is synthesized from nothing or brought from external environment.
 
-We start by gathering example files in a freshly created working directory, say `glyco/`:
+We start by gathering example files in a fresh temporary created working directory (it will no longer exist after ending the R session):
 ```{r}
-dir.create("glyco")
-file.copy(c(fmeas, fsto), "glyco/")
+ddir=tempfile(pattern="glyco")
+dir.create(ddir)
+file.copy(c(fmeas, fsto), ddir)
 ```
 ## Data exploring
 
 Let fit available data with B-splines of order 4 and with 5 internal knots (default in `dynafluxr`), then plot them to have an idea how data looks like:
 ```{r}
-fmeas="glyco/data.tsv"
+fmeas=file.path(ddir, "data.tsv")
+fsto=file.path(ddir, "network.txt")
 mf=read.delim(fmeas, comment.char="#")
 nm=colnames(mf)[-1L]
 msp=fitsmbsp(mf$Time, mf[, nm], n=4, nki=5)
@@ -85,13 +87,13 @@ We can see also in the previous plot that FBP has non zero values at the beginni
 We try `dynafluxr::cli()` (Command Line Interface) function with minimal options, just indicating measurement data, stoichiometric model and, as seen before, that GLC/FBP must be monotonously decreasing/increasing respectively and that 24 first time points must be skipped. The `cli()` function is the main entry point to `dynafluxr` package and it can be used from R or from a shell environment. It is a wrapper around `dynafluxr::fdyn()` function which does the real work of flux estimation.
 
 ```{r}
-res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24"))
+res=cli(c("-m", fmeas, "-s", fsto, "--decr", "GLC", "--incr", "FBP", "--skip", "24"))
 ```
 
-The same command could be run from a shell (not R) environment. In this case it would look like:
+The same command could be run from a shell (not R) environment if variables \$fmeas and \$fsto are defined. In this case it would look like:
 
 ```
-$ Rscript -e "dynafluxr::cli()" -m glyco/data.tsv -s glyco/network.txt --decr GLC --incr FBP --skip 24
+$ Rscript -e "dynafluxr::cli()" -m $fmeas -s $fsto --decr GLC --incr FBP --skip 24
 ```
 The `cli()` function accepts a vector of command line arguments. The first argument is `-m` or `--meas` which indicates the measurement data file, then `-s` or `--stoich` for stoichiometric model file, then options for decreasing and increasing species, skipping time points and so on. The result of the function is a list with several elements.
 The full list of available options can be viewed with `dynafluxr::cli("-h")` command. The result of `cli()` function (in case of no error in run-time), is a series of data and pdf files written in a directory `glyco/data` which is the base name of measurement data file:
@@ -102,7 +104,7 @@ list.files("glyco/data/")
 
 The file `Readme.md` describes the content of the result directory. These files can be explored by system tools like pdf-viewers and spreadsheet software but for needs of this vignette we will reproduce some results by R means. As we won't need result files in this demo page, we'll cancel their writing with empty option `-o ""` which normally indicates result directory/archive name if it is different from the default one:
 ```{r}
-res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24", "-o", ""))
+res=cli(c("-m", fmeas, "-s", fsto, "--decr", "GLC", "--incr", "FBP", "--skip", "24", "-o", ""))
 ```
 
 Let now glance on fit quality, i.e. results of $\chi^2$-test:
@@ -127,7 +129,7 @@ The reference variance is used to estimate the noise in measurements and it is u
 
 From experiment setup, we know that FBP and F6P are not measured in absolute concentration as there is a doubt about proton attribution in the measured signal. Let apply scaling factors to FBP and F6P:
 ```{r}
-res=cli(c("-m", "glyco/data.tsv", "-s", "glyco/network.txt", "--decr", "GLC", "--incr", "FBP", "--skip", "24", "--sf=FBP,F6P", "-o", "", "--sderr=GLC=0.05,G6P=0.05,FBP=0.1,F6P=0.05"))
+res=cli(c("-m", fmeas, "-s", fsto, "--decr", "GLC", "--incr", "FBP", "--skip", "24", "--sf=FBP,F6P", "-o", "", "--sderr=GLC=0.05,G6P=0.05,FBP=0.1,F6P=0.05"))
 print(res$chi2tab)
 ```
 
@@ -151,6 +153,8 @@ matplot(res$tpp, fl, t="l", ylab="Flux [mM/min]", xlab="Time [min]", main="G6P f
 abline(h=0)
 legend("topright", legend=c("Total", jnz), lty=1:5, col=1:6, lwd=2)
 ```
+
+Examples of plotting B-spline curves with smooth error intervals are given in a notebook available at [](https://github.com/MetaSys-LISBP/dynafluxr_notebook/)
 
 ## Conclusion
 
